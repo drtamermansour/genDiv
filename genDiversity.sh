@@ -11,8 +11,8 @@ conda clean --all
 mamba create -n grGWAS
 conda activate grGWAS
 mamba install conda-forge::openpyxl conda-forge::pandas
-mamba install -c bioconda plink plink2 bcftools gcta bedtools
 mamba install -c conda-forge r-base=4.5.2 r-ggplot2=4.0.1 r-gridextra=2.3 r-qqman=0.1.9 r-viridis=0.6.5 r-reshape2=1.4.5 r-ggally=2.4.0
+mamba install -c bioconda plink plink2 bcftools gcta bedtools beagle
 
 ## Create the working directory of the project
 mkdir -p $HOME/genDiv && cd $HOME/genDiv
@@ -109,13 +109,13 @@ awk 'BEGIN{FS=OFS="\t"}FNR==NR{a[$1]=$2;next}{if(a[$1])print $1,a[$1],$2,$3;}' \
 awk 'BEGIN{FS=OFS="\t";a=b=0;}{if($2!=$3)a+=1;if($2!=$4)b+=1;}END{print "mismatching SNP alleles:",a," mismatching genomic alleles:",b;}' preprocess/tmpX_compare_remap.BIM_MAP.txt
 ## mismatching SNP alleles:        35683    mismatching genomic alleles:   0
 
-##XXXXXXXXX 4. set ref alleles
-#awk 'BEGIN{FS=OFS="\t"}{if($4!=$5)print $3,$4,$5}' $equCab3_map | tr ',' '\t' > preprocess/SNP_alleles.txt ## snpID \t SNP_alleles \t genomic_alleles
-plink --bfile preprocess/USTA_Diversity_Study.remap --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-    --update-alleles preprocess/SNP_alleles.txt \
-    --a2-allele $equCab3_map 7 3 --real-ref-alleles \
-    --make-bed \
-    --output-chr 'M' --out preprocess/USTA_Diversity_Study.remap.refAlleles ## --a2-allele: 77630 assignments made.
+###XXXXXXXXX 4. set ref alleles
+##awk 'BEGIN{FS=OFS="\t"}{if($4!=$5)print $3,$4,$5}' $equCab3_map | tr ',' '\t' > preprocess/SNP_alleles.txt ## snpID \t SNP_alleles \t genomic_alleles
+#plink --bfile preprocess/USTA_Diversity_Study.remap --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+#    --update-alleles preprocess/SNP_alleles.txt \
+#    --a2-allele $equCab3_map 7 3 --real-ref-alleles \
+#    --make-bed \
+#    --output-chr 'M' --out preprocess/USTA_Diversity_Study.remap.refAlleles ## --a2-allele: 77630 assignments made.
 
 ##########################################
 ## deduplication of SNPs based on chromosome and position
