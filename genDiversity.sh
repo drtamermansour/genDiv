@@ -11,7 +11,7 @@ conda clean --all
 mamba create -n grGWAS
 conda activate grGWAS
 mamba install conda-forge::openpyxl conda-forge::pandas
-mamba install -c conda-forge r-base=4.5.2 r-ggplot2=4.0.1 r-gridextra=2.3 r-qqman=0.1.9 r-viridis=0.6.5 r-reshape2=1.4.5 r-ggally=2.4.0
+mamba install -c conda-forge r-base=4.5.2 r-ggplot2=4.0.1 r-gridextra=2.3 r-qqman=0.1.9 r-viridis=0.6.5 r-reshape2=1.4.5 r-ggally=2.4.0 r-hierfstat=0.5_11 r-effsize=0.8.1
 mamba install -c bioconda plink plink2 bcftools gcta bedtools beagle
 
 ## Create the working directory of the project
@@ -65,6 +65,8 @@ awk 'BEGIN{FS=",";OFS="\t"}FNR==NR{a[$1]=$3;next}{if(a[$2])print $1,$2,a[$2];}' 
 awk 'BEGIN{FS=",";OFS="\t"}FNR==NR{a[$1]=$5;next}{if(a[$2])print $1,$2,a[$2];}' \
     $docs/USTA_Gait_BookSize_Assignments_Sex_Added.csv preprocess/USTA_Diversity_Study.ids > preprocess/USTA_Diversity_Study.bookSize
 
+awk 'BEGIN{FS=OFS="\t"} NR==FNR {a[$2]=$3;next}{print $1,$2,a[$2]"_"$3}' \
+    preprocess/USTA_Diversity_Study.gait preprocess/USTA_Diversity_Study.bookSize > preprocess/USTA_Diversity_Study.gait_bookSize
 ##########################################
 ## New remapping to EquCab3 coordinates
 ##########################################
@@ -386,8 +388,97 @@ bcftools norm -c ws -f $ref $vcf_pruned.test.gz 1> $vcf_fvcf_prunediltered.test.
 #        --make-bed \
 #        --output-chr 'chrM' --out "$pl1_pruned".clean
 
+
+########################################################
+## 1. Effective number of alleles (\(A_{e}\)) 
+## A_e represents the number of equally frequent alleles required to achieve the same level of expected heterozygosity (\(H_{e}\)) observed in a population
+########################################################
+
+## Formula
+## \(A_{e} = \frac{1}{\sum p_{i}^{2}}\)
+## where \(p_{i}\) is the frequency of the \(i^{th}\) allele
+
+## Example Calculation
+## Suppose a single locus has three alleles with the observed frequencies (0.6, 0.3, 0.1) in a population.
+## 1. Calculate the squared frequencies: 0.36, 0.09, and 0.01
+## 2. Calculate \(A_{e}\): 1/(0.36 + 0.09 + 0.01) = 1/0.46 = 2.17
+## This result means that although there are 3 distinct alleles, the population's genetic diversity is equivalent to a population with only 2.17 equally frequent alleles. 
+
+## Calculate \(A_{e}\) for each SNP
+plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+    --freq \
+    --out "$pl1_pruned.freq_stats"
+awk 'BEGIN{FS=OFS="\t"} NR==1{print $0,"A_e";next} {p1=$6; p2=1-p1; Ae=1/(p1*p1 + p2*p2); print $0,Ae}' "$pl1_pruned.freq_stats.afreq" > "$pl1_pruned.freq_stats.wholePop.afreq.Ae"
+awk -v pop="wholePop" 'BEGIN{FS=OFS="\t"} NR==1{next} {sum_Ae+=$NF; sumsq += $NF * $NF; n++} END \
+    { if (n > 0) { mean_Ae = sum_Ae/n; sd_Ae = sqrt((sumsq/n - mean_Ae^2)); print "Mean_Ae_in_"pop, mean_Ae, "SD_Ae_in_"pop, sd_Ae } }' "$pl1_pruned.freq_stats.wholePop.afreq.Ae"
+
+## Calculate \(A_{e}\) for each SNP per gait subpopulation
+group="gait"
+plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+    --pheno preprocess/USTA_Diversity_Study.$group \
+    --loop-cats 'PHENO1' --freq \
+    --out "$pl1_pruned.freq_stats"
+
+## Calculate Mean \(A_{e}\) and standard deviation per gait subpopulation
+for pop in Trotter Pacer; do
+    awk 'BEGIN{FS=OFS="\t"} NR==1{print $0,"A_e";next} {p1=$6; p2=1-p1; Ae=1/(p1*p1 + p2*p2); print $0,Ae}' "$pl1_pruned.freq_stats.$pop.afreq" > "$pl1_pruned.freq_stats.$pop.afreq.Ae"
+    awk -v pop=$pop 'BEGIN{FS=OFS="\t"} NR==1{next} {sum_Ae+=$NF; sumsq += $NF * $NF; n++} END \
+        { if (n > 0) { mean_Ae = sum_Ae/n; sd_Ae = sqrt((sumsq/n - mean_Ae^2)); print "Mean_Ae_in_"pop, mean_Ae, "SD_Ae_in_"pop, sd_Ae } }' "$pl1_pruned.freq_stats.$pop.afreq.Ae"
+done
+
+## Calculate \(A_{e}\) for each SNP per book size in each gait subpopulation
+plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+    --pheno preprocess/USTA_Diversity_Study.gait_bookSize \
+    --loop-cats 'PHENO1' --freq \
+    --out "$pl1_pruned.freq_stats"
+
+## Calculate Mean \(A_{e}\) and standard deviation per book size
+for pop in Trotter Pacer; do
+    for book in LOW MEDIUM HIGH;do
+        awk 'BEGIN{FS=OFS="\t"} NR==1{print $0,"A_e";next} {p1=$6; p2=1-p1; Ae=1/(p1*p1 + p2*p2); print $0,Ae}' "$pl1_pruned.freq_stats.${pop}_${book}.afreq" > "$pl1_pruned.freq_stats.${pop}_${book}.afreq.Ae"
+        awk -v gp=${pop}_${book} 'BEGIN{FS=OFS="\t"} NR==1{next} {sum_Ae+=$NF; sumsq += $NF * $NF; n++} END \
+            { if (n > 0) { mean_Ae = sum_Ae/n; sd_Ae = sqrt((sumsq/n - mean_Ae^2)); print "Mean_Ae_in_"gp, mean_Ae, "SD_Ae_in_"gp, sd_Ae } }' "$pl1_pruned.freq_stats.${pop}_${book}.afreq.Ae"
+    done
+done
+
+
+Rscript scripts/effAllele_stats.R &> divStats/effAllele_stats.txt
+
 ##########################################
-## 1. Expected and observed heterozygosity and inbreeding coefficient
+## 2. Fst between subpopulations (genders, gait types, and book sizes)
+##########################################
+## The fixation index can range from 0 to 1, where 0 means complete sharing of genetic material and 1 means no sharing. 
+## For values equal to 1(meaning no sharing), scientists say that the populations are fixed.
+## Effects of marker type and filtering criteria on QST-FST comparisons: https://pmc.ncbi.nlm.nih.gov/articles/PMC6894560/
+for group in sex gait bookSize; do
+    plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+        --pheno preprocess/USTA_Diversity_Study.$group \
+        --fst 'PHENO1' 'blocksize=2000' \
+        --output-chr 'chrM' --out divStats/filtered.LD_prune.fst_$group
+done
+
+find divStats/filtered.LD_prune.fst_*.summary -maxdepth 1 -type f | grep -v "\.x\." | xargs cat > divStats/autosomal.fst.summary
+rclone -v copy divStats/autosomal.fst.summary "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
+
+#find divStats/filtered.LD_prune.fst_*.summary -maxdepth 1 -type f | grep "\.x\." | xargs cat > divStats/chrX.fst.summary
+#rclone -v copy divStats/chrX.fst.summary "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/" --drive-shared-with-me
+
+group="bookSize"
+plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+    --keep <(grep "Trotter" preprocess/USTA_Diversity_Study.gait) \
+    --pheno preprocess/USTA_Diversity_Study.$group \
+    --fst 'PHENO1' 'blocksize=2000' \
+    --output-chr 'chrM' --out divStats/filtered.LD_prune.fst_$group.Trotter
+
+plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+    --keep <(grep "Pacer" preprocess/USTA_Diversity_Study.gait) \
+    --pheno preprocess/USTA_Diversity_Study.$group \
+    --fst 'PHENO1' 'blocksize=2000' \
+    --output-chr 'chrM' --out divStats/filtered.LD_prune.fst_$group.Pacer
+
+
+##########################################
+## 3. Expected and observed heterozygosity and inbreeding coefficient
 ##########################################
 ## An inbreeding coefficient (COI) is a measure of the probability that an individual will have two copies of an allele that are identical by descent from a common ancestor. 
 ## A higher COI means more predictability of traits but also a greater risk of genetic health problems due to inbreeding depression
@@ -399,6 +490,13 @@ awk -v size=0.02 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($8/size); a[b]++; bmax=b>bm
 
 rclone -v copy divStats --include "filtered.LD_prune.het_stats.het*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/het_and_COI/" --drive-shared-with-me
 
+## generate a summary table of heterozygosity and inbreeding coefficient in the two subpopulations and the whole cohort
+awk 'BEGIN{FS=OFS="\t";a["IID"]="Gait"}NR==FNR{a[$1]=$3;next}{print $0,a[$2]}' \
+     $docs/USTA_Gait_BookSize_Assignments_Sex_Added.tsv divStats/filtered.LD_prune.het_stats.het > divStats/filtered.LD_prune.het_stats.het.wGait
+
+INPUT_HET="divStats/filtered.LD_prune.het_stats.het.wGait"
+OUTPUT_FILE="divStats/filtered.LD_prune.het_stats.het.wGait.sumStats.csv"
+python scripts/summary_het.py -i "$INPUT_HET" -o "$OUTPUT_FILE"
 
 #plink --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
 #    --het --ibc \
@@ -510,24 +608,6 @@ eigenvec_suffix="wCOI"; color_column="COI"; out_png="divStats/pca_plot_inbreedin
 Rscript scripts/pca_3plots_scaleColor.R "$pca_prefix" "$eigenvec_suffix" "$color_column" "$out_png"
 rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
-##########################################
-## 3. Fst between subpopulations (genders, gait types, and book sizes)
-##########################################
-## The fixation index can range from 0 to 1, where 0 means complete sharing of genetic material and 1 means no sharing. 
-## For values equal to 1(meaning no sharing), scientists say that the populations are fixed.
-## Effects of marker type and filtering criteria on QST-FST comparisons: https://pmc.ncbi.nlm.nih.gov/articles/PMC6894560/
-for group in sex gait bookSize; do
-    plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-        --pheno preprocess/USTA_Diversity_Study.$group \
-        --fst 'PHENO1' 'blocksize=2000' \
-        --output-chr 'chrM' --out divStats/filtered.LD_prune.fst_$group
-done
-
-find divStats/filtered.LD_prune.fst_*.summary -maxdepth 1 -type f | grep -v "\.x\." | xargs cat > divStats/autosomal.fst.summary
-rclone -v copy divStats/autosomal.fst.summary "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
-
-#find divStats/filtered.LD_prune.fst_*.summary -maxdepth 1 -type f | grep "\.x\." | xargs cat > divStats/chrX.fst.summary
-#rclone -v copy divStats/chrX.fst.summary "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/" --drive-shared-with-me
 
 ##########################################
 # 4. Runs of homozygosity (ROH)
@@ -575,13 +655,13 @@ plink --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
 ## KBAVG	Average length of runs (kb)
 ## Calculate summary stats from .hom.indiv 
 awk 'NR > 1{ sum4 += $4; sum5 += $5; sum6 += $6 } END \
-    { printf "Average Number of runs of homozygosity (NSEG) : %.2f\n \
+    { count = NR - 1; printf "Average Number of runs of homozygosity (NSEG) : %.2f\n \
     Average of the total length of runs (kb) across all samples: %.2f\n \
     Average of the average length of runs (KBAVG) across all samples: %.2f\n", \
-    sum4/NR, sum5/NR, sum6/NR }' divStats/filtered.LD_prune.roh_$group.hom.indiv
-##Average Number of runs of homozygosity (NSEG) : 16.64 
-##Average of the total length of runs (kb) across all samples: 175,509.79
-##Average of the average length of runs (KBAVG) across all samples: 10,444.63
+    sum4/count, sum5/count, sum6/count }' divStats/filtered.LD_prune.roh_$group.hom.indiv
+##Average Number of runs of homozygosity (NSEG) : 16.67 
+##Average of the total length of runs (kb) across all samples: 175,814.49
+##Average of the average length of runs (KBAVG) across all samples: 10,462.76
 
 
 ## Rscript that plots the correlation between "KB" and "KBAVG" from .hom.indiv and the difference O(HET) and E(HET), and F columns from .het
@@ -601,13 +681,13 @@ plink --bfile "$pl1_filtered" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
         --output-chr 'chrM' --out divStats/filtered.not_pruned.roh_$group
 
 awk 'NR > 1{ sum4 += $4; sum5 += $5; sum6 += $6 } END \
-    { printf "Average Number of runs of homozygosity (NSEG) : %.2f\n \
+    { count = NR - 1; printf "Average Number of runs of homozygosity (NSEG) : %.2f\n \
     Average of the total length of runs (kb) across all samples: %.2f\n \
     Average of the average length of runs (KBAVG) across all samples: %.2f\n", \
-    sum4/NR, sum5/NR, sum6/NR }' divStats/filtered.not_pruned.roh_$group.hom.indiv
-##Average Number of runs of homozygosity (NSEG) : 33.86
-##Average of the total length of runs (kb) across all samples: 352,620.78
-##Average of the average length of runs (KBAVG) across all samples: 10,343.87
+    sum4/count, sum5/count, sum6/count }' divStats/filtered.not_pruned.roh_$group.hom.indiv
+##Average Number of runs of homozygosity (NSEG) : 33.92
+##Average of the total length of runs (kb) across all samples: 353,232.97
+##Average of the average length of runs (KBAVG) across all samples: 10,361.83
 
 
 ## Rscript that plots the correlation between  KB and KBAVG from .hom.indiv and the difference O(HET) and E(HET), and F columns from .het
@@ -628,13 +708,13 @@ plink --bfile "$pl1_filtered" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
         --output-chr 'chrM' --out divStats/filtered.not_pruned.group_roh_$group
 
 awk 'NR > 1{ sum4 += $4; sum5 += $5; sum6 += $6 } END \
-    { printf "Average Number of runs of homozygosity (NSEG) : %.2f\n \
+    { count = NR - 1; printf "Average Number of runs of homozygosity (NSEG) : %.2f\n \
     Average of the total length of runs (kb) across all samples: %.2f\n \
     Average of the average length of runs (KBAVG) across all samples: %.2f\n", \
-    sum4/NR, sum5/NR, sum6/NR }' divStats/filtered.not_pruned.group_roh_$group.hom.indiv
-##Average Number of runs of homozygosity (NSEG) : 35.40
-##Average of the total length of runs (kb) across all samples: 363,484.94
-##Average of the average length of runs (KBAVG) across all samples: 10,194.10
+    sum4/count, sum5/count, sum6/count }' divStats/filtered.not_pruned.group_roh_$group.hom.indiv
+##Average Number of runs of homozygosity (NSEG) : 35.46
+##Average of the total length of runs (kb) across all samples: 364,115.99
+##Average of the average length of runs (KBAVG) across all samples: 10,211.80
 
 ## Rscript that plots the correlation between  KB and KBAVG from .hom.indiv and the difference O(HET) and E(HET), and F columns from .het
 roh_indiv="divStats/filtered.not_pruned.group_roh_$group.hom.indiv" ## to read KB and KBAVG
@@ -688,13 +768,13 @@ grep -E "^RG|^#" divStats/roh_out.txt > divStats/roh_out_RG.txt
 ## Summary stats by RG
 awk 'BEGIN{print "IID\tNSEG\tKB\tKBAVG"} $1=="RG"{n[$2]++; sum[$2]+=$6} END{for (s in n) printf "%s\t%d\t%.2f\t%.2f\n", s, n[s], sum[s]/1000, (sum[s]/1000)/n[s]}' divStats/roh_out_RG.txt > divStats/roh_summary_by_RG.txt
 awk 'NR > 1{ sum2 += $2; sum3 += $3; sum4 += $4 } END \
-    { printf "Average Number of runs of homozygosity (NSEG) : %.2f\n \
+    { count = NR - 1; printf "Average Number of runs of homozygosity (NSEG) : %.2f\n \
     Average of the total length of runs (kb) across all samples: %.2f\n \
     Average of the average length of runs (KBAVG) across all samples: %.2f\n", \
-    sum2/NR, sum3/NR, sum4/NR }' divStats/roh_summary_by_RG.txt
-##Average Number of runs of homozygosity (NSEG) : 86.58
-##Average of the total length of runs (kb) across all samples: 454,816.26
-##Average of the average length of runs (KBAVG) across all samples: 5,229.99
+    sum2/count, sum3/count, sum4/count }' divStats/roh_summary_by_RG.txt
+##Average Number of runs of homozygosity (NSEG) : 86.73
+##Average of the total length of runs (kb) across all samples: 455,605.87
+##Average of the average length of runs (KBAVG) across all samples: 5,239.07
 
 ## filtration to match the PLINK quality suggestions 
 #Minimum ROH length (--homozyg-kb) 1000 kb
@@ -709,38 +789,15 @@ awk '/^#/ || $8 >= 20' divStats/roh.L2.txt > divStats/roh.L3.txt
 #roh-viz -i divStats/roh.L3.txt -v $vcf_filtered.gz -o divStats/roh.L3_viz.html
 #rclone -v copy divStats/roh.L3_viz.html "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/" --drive-shared-with-me
 
-## Summary stats by RG after QC filtration
-awk 'BEGIN{print "IID\tNSEG\tKB\tKBAVG"} $1=="RG"{n[$2]++; sum[$2]+=$6} END{for (s in n) printf "%s\t%d\t%.2f\t%.2f\n", s, n[s], sum[s]/1000, (sum[s]/1000)/n[s]}' divStats/roh.L3.txt > divStats/roh_summary_by_RG_L3.txt
-awk 'NR > 1{ sum2 += $2; sum3 += $3; sum4 += $4 } END \
-    { printf "Average Number of runs of homozygosity (NSEG) : %.2f\n \
-    Average of the total length of runs (kb) across all samples: %.2f\n \
-    Average of the average length of runs (KBAVG) across all samples: %.2f\n", \
-    sum2/NR, sum3/NR, sum4/NR }' divStats/roh_summary_by_RG_L3.txt
-##Average Number of runs of homozygosity (NSEG) : 54.60
-##Average of the total length of runs (kb) across all samples: 411,787.308
-##Average of the average length of runs (KBAVG) across all samples: 7,492.35
-
-## Stratify the file by the gait type
-## Pacer
-awk 'BEGIN{gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {print $0,gait[$1]}' preprocess/USTA_Diversity_Study.gait divStats/roh_summary_by_RG_L3.txt > divStats/roh.L3_gait.txt
-awk '{ sum2 += $2; sum3 += $3; sum4 += $4 } END \
-    { printf "Average Number of runs of homozygosity (NSEG) : %.2f\n \
-    Average of the total length of runs (kb) across all samples: %.2f\n \
-    Average of the average length of runs (KBAVG) across all samples: %.2f\n", \
-    sum2/NR, sum3/NR, sum4/NR }' <(grep "Pacer" divStats/roh.L3_gait.txt)
-##Average Number of runs of homozygosity (NSEG) : 50.76
-##Average of the total length of runs (kb) across all samples: 382,228.83
-##Average of the average length of runs (KBAVG) across all samples: 7,515.25
-
-## Trotter
-awk '{ sum2 += $2; sum3 += $3; sum4 += $4 } END \
-    { printf "Average Number of runs of homozygosity (NSEG) : %.2f\n \
-    Average of the total length of runs (kb) across all samples: %.2f\n \
-    Average of the average length of runs (KBAVG) across all samples: %.2f\n", \
-    sum2/NR, sum3/NR, sum4/NR }' <(grep "Trotter" divStats/roh.L3_gait.txt)
-##Average Number of runs of homozygosity (NSEG) : 58.62
-##Average of the total length of runs (kb) across all samples: 442,775.16
-##Average of the average length of runs (KBAVG) across all samples: 7,495.47
+## Summary stats by RG after QC filtration && Stratify the file by the gait type
+awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {print $0,gait[$1]}' preprocess/USTA_Diversity_Study.gait divStats/roh_summary_by_RG_L3.txt > divStats/roh.L3_gait.txt
+INPUT_ROH="divStats/roh.L3_gait.txt"
+OUTPUT_FILE="divStats/roh.L3_gait.sumStats.csv"
+python scripts/summary_roh.py -i "$INPUT_ROH" -o "$OUTPUT_FILE"
+#Subgroup,          N,      NSEG,           KB,                         KBAVG
+#Whole Population,  576,    54.69 +/- 9.38, 412501.99 +/- 103185.19,    7505.36 +/- 1209.18
+#Pacer,             288,    50.76 +/- 7.23, 382228.83 +/- 83051.54,     7515.25 +/- 1208.05
+#Trotter,           288,    58.62 +/- 9.65, 442775.16 +/- 112225.63,    7495.47 +/- 1212.33
 
 ## Rscript that plots the correlation between KB and KBAVG from .hom.indiv and the difference O(HET) and E(HET), and F columns from .het
 roh_indiv="divStats/roh_summary_by_RG_L3.txt" ## to read KB and KBAVG
@@ -929,6 +986,12 @@ rclone -v copy divStats  --drive-shared-with-me --include "roh_summary_by_RG_L3_
 
 awk '{if($5>0.3)print $0}' divStats/roh_summary_by_RG_L3_Froh.txt | tr '\t' ',' > divStats/roh_high.csv
 rclone -v copy divStats/roh_high.csv  --drive-shared-with-me "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/"
+
+## Summary stats of all ROH metrics Stratified the file by the gait type
+awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {print $0,gait[$1]}' preprocess/USTA_Diversity_Study.gait divStats/roh_summary_by_RG_L3_Froh.txt > divStats/roh.L3_Froh_gait.txt
+INPUT_ROH="divStats/roh.L3_Froh_gait.txt"
+OUTPUT_FILE="divStats/roh.L3_Froh_gait.sumStats.csv"
+python scripts/summary_roh_v2.py -i "$INPUT_ROH" -o "$OUTPUT_FILE"
 
 
 
@@ -1219,43 +1282,5 @@ for pop in "wholePop" "Trotter" "Pacer";do
 done
 
 ########################################################
-## Effective number of alleles (\(A_{e}\)) represents the number of equally frequent alleles required to achieve the same level of expected heterozygosity (\(H_{e}\)) observed in a population
-
-## Formula
-## \(A_{e} = \frac{1}{\sum p_{i}^{2}}\)
-## where \(p_{i}\) is the frequency of the \(i^{th}\) allele
-
-## Example Calculation
-## Suppose a single locus has three alleles with the observed frequencies (0.6, 0.3, 0.1) in a population.
-## 1. Calculate the squared frequencies: 0.36, 0.09, and 0.01
-## 2. Calculate \(A_{e}\): 1/(0.36 + 0.09 + 0.01) = 1/0.46 = 2.17
-## This result means that although there are 3 distinct alleles, the population's genetic diversity is equivalent to a population with only 2.17 equally frequent alleles. 
-
-## Calculate \(A_{e}\) for each SNP
-plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-    --freq \
-    --out "$pl1_pruned.freq_stats"
-## --freq counts: Allele counts (founders only) written to
-## LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.LD_prune.freq_stats.afreq
-awk 'BEGIN{FS=OFS="\t"} NR==1{print $0,"A_e";next} {p1=$6; p2=1-p1; Ae=1/(p1*p1 + p2*p2); print $0,Ae}' "$pl1_pruned.freq_stats.afreq" > "$pl1_pruned.freq_stats.wholePop.afreq.Ae"
-
-plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-    --pheno preprocess/USTA_Diversity_Study.$group \
-    --loop-cats 'PHENO1' --freq \
-    --out "$pl1_pruned.freq_stats"
-
-for pop in Trotter Pacer; do
-    awk -v pop=$pop 'BEGIN{FS=OFS="\t"} NR==1{print $0,"A_e";next} {p1=$6; p2=1-p1; Ae=1/(p1*p1 + p2*p2); print $0,Ae}' "$pl1_pruned.freq_stats.$pop.afreq" > "$pl1_pruned.freq_stats.$pop.afreq.Ae"
-done
-
-## Calculate Mean \(A_{e}\) and standard deviation per population
-for pop in wholePop Trotter Pacer; do
-    #awk -v pop=$pop 'BEGIN{FS=OFS="\t"} NR==1{next} {sum_Ae+=$NF; n++} END{ mean_Ae = (n?sum_Ae/n:0); sd_Ae = (n?sqrt((sum_Ae^2/n - mean_Ae^2)):0); print "Mean_Ae_in_"pop, mean_Ae, "SD_Ae_in_"pop, sd_Ae }' "$pl1_pruned.freq_stats.$pop.afreq.Ae"
-    awk -v pop=$pop 'BEGIN{FS=OFS="\t"} NR==1{next} {sum_Ae+=$NF; sumsq += $NF * $NF; n++} END \
-        { if (n > 0) { mean_Ae = sum_Ae/n; sd_Ae = sqrt((sumsq/n - mean_Ae^2)); print "Mean_Ae_in_"pop, mean_Ae, "SD_Ae_in_"pop, sd_Ae } }' "$pl1_pruned.freq_stats.$pop.afreq.Ae"
-done
-#Mean_Ae_in_wholePop     1.55957 SD_Ae_in_wholePop       0.322746
-#Mean_Ae_in_Trotter      1.5311  SD_Ae_in_Trotter        0.33893
-#Mean_Ae_in_Pacer        1.55019 SD_Ae_in_Pacer          0.330677
 
 
