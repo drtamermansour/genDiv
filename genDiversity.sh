@@ -13,6 +13,7 @@ conda activate grGWAS
 mamba install conda-forge::openpyxl conda-forge::pandas
 mamba install -c conda-forge r-base=4.5.2 r-ggplot2=4.0.1 r-gridextra=2.3 r-qqman=0.1.9 r-viridis=0.6.5 r-reshape2=1.4.5 r-ggally=2.4.0 r-hierfstat=0.5_11 r-effsize=0.8.1
 mamba install -c bioconda plink plink2 bcftools gcta bedtools beagle
+mamba install -c conda-forge matplotlib=3.10.8 seaborn=0.13.2 scipy=1.17.0
 
 ## Create the working directory of the project
 mkdir -p $HOME/genDiv && cd $HOME/genDiv
@@ -443,7 +444,13 @@ done
 
 
 Rscript scripts/effAllele_stats.R &> divStats/effAllele_stats.txt
+Rscript scripts/plot_Ae.R
+rclone -v copy divStats/effAllele_stats.txt "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Ae/" --drive-shared-with-me
+rclone -v copy divStats/Figure_Ae_BookSize.tiff "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Ae/" --drive-shared-with-me
+#rclone -v copy divStats/Figure_Ae_BookSize.pdf "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Ae/" --drive-shared-with-me
 
+ggsave("divStats/Figure_Ae_BookSize.tiff", plot = p, width = 8, height = 6, dpi = 300)
+ggsave("divStats/Figure_Ae_BookSize.pdf", plot = p, width = 8, height = 6)
 ##########################################
 ## 2. Fst between subpopulations (genders, gait types, and book sizes)
 ##########################################
@@ -469,14 +476,16 @@ plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
     --pheno preprocess/USTA_Diversity_Study.$group \
     --fst 'PHENO1' 'blocksize=2000' \
     --output-chr 'chrM' --out divStats/filtered.LD_prune.fst_$group.Trotter
+rclone -v copy divStats/filtered.LD_prune.fst_bookSize.Trotter.fst.summary "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
 
 plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
     --keep <(grep "Pacer" preprocess/USTA_Diversity_Study.gait) \
     --pheno preprocess/USTA_Diversity_Study.$group \
     --fst 'PHENO1' 'blocksize=2000' \
     --output-chr 'chrM' --out divStats/filtered.LD_prune.fst_$group.Pacer
+rclone -v copy divStats/filtered.LD_prune.fst_bookSize.Pacer.fst.summary "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
 
-
+Rscript scripts/fst_stats.R &> divStats/fst_stats.txt
 ##########################################
 ## 3. Expected and observed heterozygosity and inbreeding coefficient
 ##########################################
@@ -816,12 +825,16 @@ awk 'BEGIN{OFS="\t"} $1=="RG" {print $3, $4-1, $5, $2}' "${roh_RG}.txt" > "${roh
 cut -f4 "${roh_RG}.bed" | sort -u | while read S; do
   awk -v s="$S" '$4==s' "${roh_RG}.bed" | sort -k1,1 -k2,2n | bedtools merge -i - | awk -v s="$S" 'BEGIN{OFS="\t"}{print $1,$2,$3,s}'
 done | sort -k1,1 -k2,2n > "${roh_RG}.merged_per_sample.wholePop.bed"
-grep "Trotter" preprocess/USTA_Diversity_Study.gait | cut -f2 | grep -f - "${roh_RG}.merged_per_sample.wholePop.bed" > "${roh_RG}.merged_per_sample.Trotter.bed"
-grep "Pacer" preprocess/USTA_Diversity_Study.gait | cut -f2 | grep -f - "${roh_RG}.merged_per_sample.wholePop.bed" > "${roh_RG}.merged_per_sample.Pacer.bed"
+
+# subset the bed file for each subpopulation
+for rg in "Trotter" "Pacer" "Trotter_LOW" "Trotter_MEDIUM" "Trotter_HIGH" "Pacer_LOW" "Pacer_MEDIUM" "Pacer_HIGH"; do 
+    grep "$rg" preprocess/USTA_Diversity_Study.gait_bookSize | cut -f2 | grep -f - "${roh_RG}.merged_per_sample.wholePop.bed" > "${roh_RG}.merged_per_sample.${rg}.bed"
+done
+
 # 3. Calculate per-base ROH frequency (i.e., how many samples are in ROH at each base position)
 reference_fai=$HOME/Equine80select_remapper/equCab3/equCab3_genome.fa.fai
 awk '$1 ~ /^[0-9]+$/' $reference_fai | awk 'BEGIN{OFS="\t"}{print "chr"$1,$2}' > divStats/autosomes.genome
-for rg in "wholePop" "Trotter" "Pacer"; do
+for rg in "wholePop" "Trotter" "Pacer" "Trotter_LOW" "Trotter_MEDIUM" "Trotter_HIGH" "Pacer_LOW" "Pacer_MEDIUM" "Pacer_HIGH"; do 
     bedtools genomecov -i "${roh_RG}.merged_per_sample.${rg}.bed" -g divStats/autosomes.genome -bg > "${roh_RG}.per_base_coverage.${rg}.bed"
     awk -v size=5 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($4/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
                       END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  "${roh_RG}.per_base_coverage.${rg}.bed" > "${roh_RG}.per_base_coverage.${rg}.histo"
@@ -836,7 +849,7 @@ done
 # 4. Identify consensus ROH regions (≥25% of samples in ROH) and merge adjacent regions (minimum size 500 kb)
 # With and without appling a smoothing function which adjust the per-base coverage value of regions briding intervals with high coverage. The function would assign the average coverage of the region and two flanking regions to the bridged interval.
 pct=25
-for rg in "wholePop" "Trotter" "Pacer"; do
+for rg in "wholePop" "Trotter" "Pacer" "Trotter_LOW" "Trotter_MEDIUM" "Trotter_HIGH" "Pacer_LOW" "Pacer_MEDIUM" "Pacer_HIGH"; do 
   num_samples=$(cut -f4 "${roh_RG}.merged_per_sample.${rg}.bed" | sort -u | wc -l)
   threshold=$(echo "$pct * $num_samples / 100" | bc -l)
   ## Find consensus before smoothing
@@ -845,12 +858,9 @@ for rg in "wholePop" "Trotter" "Pacer"; do
 
   # Summary stats of consensus ROH regions
   echo "==== consensus ROH in ≥${pct}% of ${rg} samples ======"
-  awk -v rg="$rg" 'BEGIN{maxConsen=0;sumSamples=0;sumLen=0;} {if(maxConsen<$4)maxConsen=$4; sumSamples += $4; sumLen += $5} END \
-    {print rg,"\nNo of ROH regions:",NR,\
-    "\nTotal length of consensus ROH regions (Mbp):", sumLen,\
-    "\nAverage ROH length (Mbp):",sumLen/NR,\
-    "\nMax no of samples in consensus:", maxConsen,\
-    "\nAverage no of samples in consensus", sumSamples/NR}' "${roh_RG}.consensus_${pct}pct.merged.${rg}.bed"
+  awk -v rg="$rg" -v nsam="$num_samples" 'BEGIN{OFS=",";maxConsen=0;sumSamples=0;sumLen=0;} {if(maxConsen<$4)maxConsen=$4; sumSamples += $4; sumLen += $5} END \
+    {print rg,"\nNo. of segments","Total length (KB)","Ave. length (KB)","Max % of samples in consensus","Average % of samples in consensus",\
+    "\n"NR,sumLen,sumLen/NR,(maxConsen/nsam)*100"%",((sumSamples/NR)/nsam)*100"%"}' "${roh_RG}.consensus_${pct}pct.merged.${rg}.bed"
 
   # Smooth per-base coverage: only average a middle interval if it exactly bridges two adjacent intervals
   # and both flanking intervals are >= threshold while the middle < threshold.
@@ -876,30 +886,42 @@ for rg in "wholePop" "Trotter" "Pacer"; do
   # pause for now to save space
   #rclone -v copy ${roh_RG}.consensus_${pct}pct.merged.${rg}.bed "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
   #rclone -v copy ${roh_RG}.consensus_${pct}pct.merged.${rg}.smoothed.bed "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
-  
+
   # Summary stats of consensus ROH regions
   echo "==== consensus smoothed ROH in ≥${pct}% of ${rg} samples ======"
-  awk -v rg="$rg" 'BEGIN{maxConsen=0;sumSamples=0;sumLen=0;} {if(maxConsen<$4)maxConsen=$4; sumSamples += $4; sumLen += $5} END \
-    {print rg,"\nNo of ROH regions:",NR,\
-    "\nTotal length of consensus ROH regions (Mbp):", sumLen,\
-    "\nAverage ROH length (Mbp):",sumLen/NR,\
-    "\nMax no of samples in consensus:", maxConsen,\
-    "\nAverage no of samples in consensus", sumSamples/NR}' "${roh_RG}.consensus_${pct}pct.merged.${rg}.smoothed.bed"
+  awk -v rg="$rg" -v nsam="$num_samples" 'BEGIN{OFS=",";maxConsen=0;sumSamples=0;sumLen=0;} {if(maxConsen<$4)maxConsen=$4; sumSamples += $4; sumLen += $5} END \
+   {print rg,"\nNo. of segments","Total length (KB)","Ave. length (KB)","Max % of samples in consensus","Average % of samples in consensus",\
+    "\n"NR,sumLen,sumLen/NR,(maxConsen/nsam)*100"%",((sumSamples/NR)/nsam)*100"%"}' "${roh_RG}.consensus_${pct}pct.merged.${rg}.smoothed.bed"
+ 
 done > ${roh_RG}.consensus_${pct}pct.summary.txt
 rclone -v copy ${roh_RG}.consensus_${pct}pct.summary.txt "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
 
 
 ## intersect ROH regions of each sample aganist the consensus wholePop ROH regions
-roh_RG="divStats/roh.L3"
-bed_perSample="${roh_RG}.merged_per_sample.wholePop.bed"
-rg="wholePop"
-consensus_pct=${roh_RG}.consensus_${pct}pct.merged.${rg}.smoothed.bed
-consensus_size=$(awk 'BEGIN{sum=0} {sum+=($3-$2)} END {print sum}' ${consensus_pct})
-echo -e "IID\tTotal_ROH_in_Consensus_region(bp)\tPercent_of_Consensus_ROH" > ${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt
-cut -f4 "${bed_perSample}" | sort -u | while read S; do
-  awk -v s="$S" '$4==s' "${bed_perSample}" | sort -k1,1 -k2,2n | bedtools intersect -a stdin -b "${consensus_pct}" | awk -v s="$S" -v cs="$consensus_size" 'BEGIN{OFS="\t"}{size+=($3-$2)} END {print s, size, (size/cs)*100}'
-done >> ${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt
-rclone -v copy ${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
+roh_RG="divStats/roh.L3"; pct=25; 
+#rg="wholePop";
+for rg in "wholePop" "Trotter" "Pacer" "Trotter_LOW" "Trotter_MEDIUM" "Trotter_HIGH" "Pacer_LOW" "Pacer_MEDIUM" "Pacer_HIGH"; do 
+    consensus_pct=${roh_RG}.consensus_${pct}pct.merged.${rg}.smoothed.bed
+    consensus_size=$(awk 'BEGIN{sum=0} {sum+=($3-$2)} END {print sum}' ${consensus_pct})
+    bed_perSample="${roh_RG}.merged_per_sample.${rg}.bed"
+    echo -e "IID\tTotal_ROH_in_Consensus_region(bp)\tPercent_of_Consensus_ROH" > ${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt
+    cut -f4 "${bed_perSample}" | sort -u | while read S; do
+      awk -v s="$S" '$4==s' "${bed_perSample}" | sort -k1,1 -k2,2n | bedtools intersect -a stdin -b "${consensus_pct}" | awk -v s="$S" -v cs="$consensus_size" 'BEGIN{OFS="\t"}{size+=($3-$2)} END {print s, size, (size/cs)*100}'
+    done >> ${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt
+    #rclone -v copy ${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
+done
+
+## merge the intersection with Trotter/Pacer consensus
+head -n1  ${roh_RG}.perSample_intersect_wholePop_consensus_${pct}pct.summary.txt > ${roh_RG}.perSample_intersect_twoGait_consensus_${pct}pct.summary.txt
+for rg in "Trotter" "Pacer";do 
+    tail -n+2 ${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt;
+done >> ${roh_RG}.perSample_intersect_twoGait_consensus_${pct}pct.summary.txt  
+
+## merge the intersection with Trotter_booksize/Pacer_booksize consensus
+head -n1  ${roh_RG}.perSample_intersect_wholePop_consensus_${pct}pct.summary.txt > ${roh_RG}.perSample_intersect_threeBooksize_consensus_${pct}pct.summary.txt
+for rg in "Trotter_LOW" "Trotter_MEDIUM" "Trotter_HIGH" "Pacer_LOW" "Pacer_MEDIUM" "Pacer_HIGH";do 
+    tail -n+2 ${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt;
+done >> ${roh_RG}.perSample_intersect_threeBooksize_consensus_${pct}pct.summary.txt  
 
 ############################################
 ## 4E. Studying ROH using Howard et al. (2016) approach
@@ -987,13 +1009,38 @@ rclone -v copy divStats  --drive-shared-with-me --include "roh_summary_by_RG_L3_
 awk '{if($5>0.3)print $0}' divStats/roh_summary_by_RG_L3_Froh.txt | tr '\t' ',' > divStats/roh_high.csv
 rclone -v copy divStats/roh_high.csv  --drive-shared-with-me "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/"
 
-## Summary stats of all ROH metrics Stratified the file by the gait type
+## Summary stats of all ROH metrics Stratified by the gait type
 awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {print $0,gait[$1]}' preprocess/USTA_Diversity_Study.gait divStats/roh_summary_by_RG_L3_Froh.txt > divStats/roh.L3_Froh_gait.txt
 INPUT_ROH="divStats/roh.L3_Froh_gait.txt"
 OUTPUT_FILE="divStats/roh.L3_Froh_gait.sumStats.csv"
 python scripts/summary_roh_v2.py -i "$INPUT_ROH" -o "$OUTPUT_FILE"
+# Summary saved to divStats/roh.L3_Froh_gait.sumStats.csv
 
+## Summary stats of all ROH metrics Stratified by book size for each gait type
+awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {print $0,gait[$1]}' preprocess/USTA_Diversity_Study.gait_bookSize divStats/roh_summary_by_RG_L3_Froh.txt > divStats/roh.L3_Froh_gait_bookSize.txt
+INPUT_ROH="divStats/roh.L3_Froh_gait_bookSize.txt"
+OUTPUT_FILE="divStats/roh.L3_Froh_gait_bookSize.sumStats.csv"
+python scripts/summary_roh_v2.py -i "$INPUT_ROH" -o "$OUTPUT_FILE"
+rclone -v copy roh_scatter_enhanced.png --drive-shared-with-me "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/"
 
+# Summary saved to divStats/roh.L3_Froh_gait_bookSize.sumStats.csv
+
+roh_RG="divStats/roh.L3"; pct=25; 
+froh="divStats/roh.L3_Froh_gait_bookSize.txt"
+for gp in "wholePop" "twoGait" "threeBooksize";do 
+    conShare=${roh_RG}.perSample_intersect_${gp}_consensus_${pct}pct.summary.txt
+    output_file="divStats/Froh_vs_ROHsh_${gp}.png"
+    python scripts/roh_plot.py "$conShare" "$froh" "$output_file"
+    rclone -v copy "$output_file" --drive-shared-with-me "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/"
+    output_prefix="divStats/normalized_ROHsh_${gp}"
+    python scripts/roh_ratio_histograms.py "$conShare" "$froh" "$output_prefix"
+    rclone -v copy "$output_prefix".histogram.png --drive-shared-with-me "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/"
+    rclone -v copy "$output_prefix".density.png --drive-shared-with-me "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/"
+    output_prefix2="divStats/ROHshared_${gp}"
+    python scripts/roh_shared_histograms.py "$conShare" "$froh" "$output_prefix2"
+    rclone -v copy "$output_prefix2".histogram.png --drive-shared-with-me "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/"
+    #rclone -v copy "$output_prefix".density.png --drive-shared-with-me "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/"
+done &> divStats/roh_sh.log
 
 ############################################
 ## 6. Relatedness work
@@ -1065,6 +1112,7 @@ python $scripts/ROHRM_Creator.py $vcf_filtered.norm.phased.vcf.gz $roh_mb_cutoff
 #rclone -v copy $rohrm_dir/ROHRM_vs_VanradenGRM_Comparison.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 
 ## New version comparing with plink2 GRM implementation. Also, includes QC of ID matching and improved plotting
+## The script outputs "Robust_Matrix_Comparison_Enhanced.png", "Pairwise_Differences.csv", and "Inbreeding_Comparison.csv"
 ## python analysis_comparison.py <ROH_Prefix> <Std_Prefix> <Phenotypes_File> <output_dir>
 python $scripts/analysis_comparison.py $rohrm_dir/ROHRM.rohMinSize_$roh_mb_cutoff.rohThreshold_$roh_threshold $rohrm_dir/filtered.LD_prune.GRM_$group $phenotypes "$rohrm_dir"
 #Correlation (Inbreeding): r = -0.1686
