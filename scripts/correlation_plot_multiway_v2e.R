@@ -12,17 +12,17 @@ out_prefix <- args[5];
 
 print("### --- 1. Load data ---");
 diag <- read.csv(file1, header=TRUE, comment.char="", stringsAsFactors=FALSE);
-names(diag)[names(diag) == "F_Standard"] <- "SNPRM_COI"
-names(diag)[names(diag) == "F_ROH"] <- "ROHRM_Froh"
+names(diag)[names(diag) == "F_Standard"] <- "D_STD"
+names(diag)[names(diag) == "F_ROH"] <- "D_ROH"
 
 het  <- read.table(file2, header=TRUE, comment.char="", stringsAsFactors=FALSE);
-names(het)[names(het) == "F"] <- "COI"
+names(het)[names(het) == "F"] <- "F_SNP"
 
 froh <- read.table(file3, header=TRUE, comment.char="", stringsAsFactors=FALSE);
-names(froh)[names(froh) == "F_ROH"] <- "Froh"
+names(froh)[names(froh) == "F_ROH"] <- "F_ROH"
 
 cons <- read.table(file4, header=TRUE, comment.char="", stringsAsFactors=FALSE);
-names(cons)[names(cons) == "Percent_of_Consensus_ROH"] <- "rohShare"
+names(cons)[names(cons) == "Percent_of_Consensus_ROH"] <- "ROH_sh"
 
 print("### --- 2. Merge on IID ---");
 list_of_dfs <- list(het,froh,diag,cons)
@@ -32,7 +32,7 @@ dat <- Reduce(function(x, y) merge(x, y, by = "IID", all = TRUE), list_of_dfs)
 #dat$HET_diff <- dat$O.HET - dat$E.HET;
 
 print("### --- 4. Select variables for correlation ---");
-vars <- dat[, c("COI", "Froh", "SNPRM_COI", "ROHRM_Froh","rohShare")];
+vars <- dat[, c("F_SNP", "F_ROH", "D_ROH", "D_STD","ROH_sh")];
 
 print("### --- 5. Correlation matrix ---");
 cor_matrix <- cor(vars, use="pairwise.complete.obs");

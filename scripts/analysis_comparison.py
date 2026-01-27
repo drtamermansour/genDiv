@@ -173,8 +173,8 @@ class RobustMatrixComparator:
         plt.text(0.05, 0.95, annot_text, transform=plt.gca().transAxes, 
                  fontsize=10, verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
 
-        plt.xlabel("Standard Inbreeding ($F_{GRM}$)")
-        plt.ylabel("ROH Inbreeding ($F_{ROH}$)")
+        plt.xlabel("Diagonal of SNP-based Rel. Matrix ($D_{STD}$)")
+        plt.ylabel("Diagonal of ROH-based Rel. Matrix ($D_{ROH}$)")
         plt.title(f"Inbreeding Comparison")
 
         # --- PLOT 2: Relationship Scatter (Top Right) ---

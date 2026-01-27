@@ -17,8 +17,8 @@ create_sorted_key <- function(col1, col2) {
 print("### --- 1. Load data ---");
 diag <- read.csv(file1, header=TRUE, comment.char="", stringsAsFactors=FALSE);
 diag$key <- create_sorted_key(diag$ID1, diag$ID2)
-names(diag)[names(diag) == "Kinship_Std"] <- "SNPRM_kin"
-names(diag)[names(diag) == "Kinship_ROH"] <- "ROHRM_kin"
+names(diag)[names(diag) == "Kinship_Std"] <- "G_STD"
+names(diag)[names(diag) == "Kinship_ROH"] <- "G_ROH"
 
 kingkin_wIBS  <- read.table(file2, header=TRUE, comment.char="", stringsAsFactors=FALSE);
 kingkin_wIBS$key <- create_sorted_key(kingkin_wIBS$IID1, kingkin_wIBS$IID2)
@@ -37,7 +37,8 @@ dat <- Reduce(function(x, y) merge(x, y, by = "key", all = FALSE), list_of_dfs)
 #dat$HET_diff <- dat$O.HET - dat$E.HET;
 
 print("### --- 4. Select variables for correlation ---");
-vars <- dat[, c("SNPRM_kin", "ROHRM_kin", "King_kin","IBS", "Eucl_dist")];
+#vars <- dat[, c("G_STD", "G_ROH", "King_kin","IBS", "Eucl_dist")];
+vars <- dat[, c("G_STD", "G_ROH", "King_kin","IBS")];
 
 print("### --- 5. Correlation matrix ---");
 cor_matrix <- cor(vars, use="pairwise.complete.obs");
