@@ -377,7 +377,7 @@ bcftools norm -c ws -f $ref $vcf_filtered.test.gz 1> $vcf_filtered.test.check.vc
 
 grep -v '^##chrSet' $vcf_pruned | grep -E "^#|^chr" | bgzip --output $vcf_pruned.test.gz
 tabix $vcf_pruned.test.gz
-bcftools norm -c ws -f $ref $vcf_pruned.test.gz 1> $vcf_fvcf_prunediltered.test.check.vcf 2> $vcf_pruned.test.check.log
+bcftools norm -c ws -f $ref $vcf_pruned.test.gz 1> $vcf_pruned.test.check.vcf 2> $vcf_pruned.test.check.log
 ## Lines   total/split/joined/realigned/mismatch_removed/dup_removed/skipped:      48382/0/0/0/0/0/0
 ## REF/ALT total/modified/added:   48382/0/0
 
