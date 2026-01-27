@@ -1204,7 +1204,8 @@ Rscript scripts/correlation_plot_multiway_v2.R $RM_diag $het_stats $Froh_stats $
 rclone -v copy $out_prefix.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 
 
-roh_RG="divStats/roh.L3"; rg="wholePop"; conShare=${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt;
+#roh_RG="divStats/roh.L3"; rg="wholePop"; pct=25; conShare=${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt;
+roh_RG="divStats/roh.L3"; rg="twoGait"; pct=25; conShare=${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt;
 out_prefix2="divStats/coi_Froh_rmDiag_conShare_correlation"
 Rscript scripts/correlation_plot_multiway_v2e.R $RM_diag $het_stats $Froh_stats $conShare $out_prefix2
 rclone -v copy $out_prefix2.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
