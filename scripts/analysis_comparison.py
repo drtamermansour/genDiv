@@ -44,6 +44,8 @@ class RobustMatrixComparator:
         std_ids = self.load_ids(self.std_id_file)
         
         common_samples = np.intersect1d(roh_ids, std_ids)
+        # Filter overlapping samples to only those found in the phenotype map
+        common_samples = np.array([s for s in common_samples if s in self.pheno_map])
         print(f"  Overlapping Samples: {len(common_samples)}")
         
         if len(common_samples) == 0:
