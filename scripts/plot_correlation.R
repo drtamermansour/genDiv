@@ -53,6 +53,7 @@ correlation_text <- paste("Correlation (Pearson):", round(correlation_val, 3))
 plot_title <- paste("Correlation Plot of", col_x_name, "vs", col_y_name)
 output_filename <- paste0("correlation_plot_", col_x_name, "_vs_", col_y_name, ".png")
 
+Sys.setenv(TZ = "America/Edmonton") 
 ggplot(cleaned_data, aes(x = x, y = y)) +
   geom_point() + # Scatter plot points
   geom_smooth(method = "lm", se = FALSE, color = "blue") + # Add a linear regression line
