@@ -658,6 +658,14 @@ INPUT_HET="divStats/filtered.LD_prune.het_stats.het.wGait"
 OUTPUT_FILE="divStats/filtered.LD_prune.het_stats.het.wGait.sumStats.csv"
 python scripts/summary_het.py -i "$INPUT_HET" -o "$OUTPUT_FILE"
 
+## generate a summary table of heterozygosity and inbreeding coefficient in the three book size in the two subpopulations and the whole cohort
+awk 'BEGIN{FS=OFS="\t";a["IID"]="Gait"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' \
+     preprocess/USTA_Diversity_Study.gait_bookSize divStats/filtered.LD_prune.het_stats.het > divStats/filtered.LD_prune.het_stats.het.wGait_bookSize
+
+INPUT_HET="divStats/filtered.LD_prune.het_stats.het.wGait_bookSize"
+OUTPUT_FILE="divStats/filtered.LD_prune.het_stats.het.wGait_bookSize.sumStats.csv"
+python scripts/summary_het.py -i "$INPUT_HET" -o "$OUTPUT_FILE"
+
 rclone -v copy divStats --include "filtered.LD_prune.het_stats.het*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/het_and_COI/" --drive-shared-with-me
 
 #plink --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
@@ -1264,6 +1272,17 @@ out_prefix2="divStats/coi_Froh_rmDiag_conShare_correlation"
 Rscript scripts/correlation_plot_multiway_v2e.R $RM_diag $het_stats $Froh_stats $conShare $out_prefix2
 rclone -v copy $out_prefix2.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 
+## focus on F_Standard vs ROH_shared
+awk 'BEGIN{FS=OFS="\t"}NR==FNR{a[$1]=$3;next}{print $0,a[$1]}' <(cat $conShare | sed 's/Percent_of_Consensus_ROH/ROH_sh/') <(cat $RM_diag | tr ',' '\t' | sed 's/F_Standard/D_STD/') > divStats/rmdiag_conShare
+input_file="divStats/rmdiag_conShare"
+Rscript $scripts/plot_correlation_withColors.R "$input_file" ROH_sh D_STD Phenotype
+rclone -v copy divStats/correlation_plot_ROH_sh_vs_D_STD_Ann.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+ 
+awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])print $0,a[$1];}' preprocess/USTA_Diversity_Study.bookSize divStats/rmdiag_conShare > divStats/rmdiag_conShare_wBooksize
+input_file="divStats/rmdiag_conShare_wBooksize"
+Rscript $scripts/plot_correlation_withColorsAndShapes.R "$input_file" ROH_sh D_STD Phenotype Book_Size
+rclone -v copy divStats/correlation_plot_ROH_sh_vs_D_STD_doubleAnn.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+
 ## Resume relatedness work ############################################
 ############################################
 ## KING-robust kinship estimator
@@ -1294,7 +1313,7 @@ awk 'BEGIN{FS=OFS="\t"}NR==1{print $0,"IBS";next}{ibs1=$8+$9;ibs2=$5-($6+$7+ibs1
 ## useless
 ## Plot the correlation between KING-robust kinship and IBS
 Rscript $scripts/plot_correlation.R ${kingkin}.withIBS KINSHIP IBS
-rclone -v copy correlation_plot_KINSHIP_vs_IBS.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+rclone -v copy divStats/correlation_plot_KINSHIP_vs_IBS.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 #Plot saved as: correlation_plot_KINSHIP_vs_IBS.png 
 #Correlation (Pearson): 0.392 
 
@@ -1372,7 +1391,7 @@ done
 for prefix in divStats/filtered.LD_prune{\.,\.Trotter\.,\.Pacer\.}pca ;do 
     out_file="$prefix.pca_pairwise_euclidean.dist.withKIN0"
     Rscript $scripts/plot_correlation.R "$out_file" PCA_EUCLIDEAN_DIST KINSHIP_PLINK
-    mv correlation_plot_PCA_EUCLIDEAN_DIST_vs_KINSHIP_PLINK.png "$prefix.correlation_plot_PCA_EUCLIDEAN_DIST_vs_KINSHIP_PLINK.png"
+    mv divStats/correlation_plot_PCA_EUCLIDEAN_DIST_vs_KINSHIP_PLINK.png "$prefix.correlation_plot_PCA_EUCLIDEAN_DIST_vs_KINSHIP_PLINK.png"
     rclone -v copy "$prefix.correlation_plot_PCA_EUCLIDEAN_DIST_vs_KINSHIP_PLINK.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 done
 
