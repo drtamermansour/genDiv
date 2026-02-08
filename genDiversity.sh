@@ -1053,6 +1053,7 @@ aut_len=$(sort -k1,1 -k2,2n "$pl1_filtered".snp_pos.txt | \
         awk '{if ($1 == prev_chr) { gap = $2 - prev_pos; \
               if(gap > 0) {if (gap > 1000000) gap = 1000000; total += gap; }}\
               prev_chr=$1; prev_pos=$2} END {print total}') ## 2,261,547,402
+echo $aut_len > divStats/effective_autosomal_genome_length.txt
 
 awk -v aut_len=$aut_len 'BEGIN{FS=OFS="\t";}NR==1{print $0,"F_ROH";next} {print $0, ($3*1000)/aut_len}' divStats/roh_summary_by_RG_L3.txt > divStats/roh_summary_by_RG_L3_Froh.txt
 awk -v size=0.02 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($5/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(tail -n+2 divStats/roh_summary_by_RG_L3_Froh.txt) > divStats/roh_summary_by_RG_L3_Froh.histo 
