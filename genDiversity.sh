@@ -963,14 +963,14 @@ for rg in "wholePop" "Trotter" "Pacer" "Trotter_LOW" "Trotter_MEDIUM" "Trotter_H
     #rclone -v copy ${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
 done
 
-## merge the intersection with Trotter/Pacer consensus
+## merge the intersection (ROH_share) with Trotter/Pacer consensus
 ## ouput: the census length and percentage in each sample aganist its own gait consensus
 head -n1  ${roh_RG}.perSample_intersect_wholePop_consensus_${pct}pct.summary.txt > ${roh_RG}.perSample_intersect_twoGait_consensus_${pct}pct.summary.txt
 for rg in "Trotter" "Pacer";do 
     tail -n+2 ${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt;
 done >> ${roh_RG}.perSample_intersect_twoGait_consensus_${pct}pct.summary.txt  
 
-## merge the intersection with Trotter_booksize/Pacer_booksize consensus
+## merge the intersection (ROH_share) with Trotter_booksize/Pacer_booksize consensus
 ## ouput: the census length and percentage in each sample aganist its own gait_bookSize consensus
 head -n1  ${roh_RG}.perSample_intersect_wholePop_consensus_${pct}pct.summary.txt > ${roh_RG}.perSample_intersect_threeBooksize_consensus_${pct}pct.summary.txt
 for rg in "Trotter_LOW" "Trotter_MEDIUM" "Trotter_HIGH" "Pacer_LOW" "Pacer_MEDIUM" "Pacer_HIGH";do 
@@ -1258,8 +1258,8 @@ mv $rohrm_dir/Robust_Matrix_Comparison_Enhanced.png $rohrm_dir/Inbreeding_Compar
 ############################################
 ## compare with het and coi
 ## Rscript that plots the correlation between KB and KBAVG from .hom.indiv and the difference O(HET) and E(HET), and F columns from .het
-RM_diag="rep_ROHRM/roh_1Mb.Threshold_3SD/Inbreeding_Comparison.csv" ## to read F_Standard (comparable to COI "F" measure in 1) and F_ROH (comparable to F_ROH measured in 5)
-het_stats="divStats/filtered.LD_prune.het_stats.het"                ## to read O(HET), E(HET), and F
+RM_diag="rep_ROHRM/roh_1Mb.Threshold_3SD/Inbreeding_Comparison.csv" ## to read D_STD (comparable to COI "F" measure in 1) and D_ROH (comparable to F_ROH measured in 5)
+het_stats="divStats/filtered.LD_prune.het_stats.het"                ## to read O(HET), E(HET), and F_SNP
 Froh_stats="divStats/roh_summary_by_RG_L3_Froh.txt"          ## to read F_ROH measured in 5
 out_prefix="divStats/coi_Froh_rmDiag_correlation"
 Rscript scripts/correlation_plot_multiway_v2.R $RM_diag $het_stats $Froh_stats $out_prefix
@@ -1272,16 +1272,38 @@ out_prefix2="divStats/coi_Froh_rmDiag_conShare_correlation"
 Rscript scripts/correlation_plot_multiway_v2e.R $RM_diag $het_stats $Froh_stats $conShare $out_prefix2
 rclone -v copy $out_prefix2.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 
-## focus on F_Standard vs ROH_shared
-awk 'BEGIN{FS=OFS="\t"}NR==FNR{a[$1]=$3;next}{print $0,a[$1]}' <(cat $conShare | sed 's/Percent_of_Consensus_ROH/ROH_sh/') <(cat $RM_diag | tr ',' '\t' | sed 's/F_Standard/D_STD/') > divStats/rmdiag_conShare
-input_file="divStats/rmdiag_conShare"
-Rscript $scripts/plot_correlation_withColors.R "$input_file" ROH_sh D_STD Phenotype
-rclone -v copy divStats/correlation_plot_ROH_sh_vs_D_STD_Ann.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+## focus on D_STD vs ROH_shared
+awk 'BEGIN{FS=OFS="\t"}NR==FNR{a[$1]=$3;next}{print $0,a[$1]}' <(cat $conShare | sed 's/Percent_of_Consensus_ROH/ROH_sh/') <(cat $RM_diag | tr ',' '\t') > divStats/rmdiag_conShare
+#input_file="divStats/rmdiag_conShare"
+#Rscript $scripts/plot_correlation_withColors.R "$input_file" ROH_sh D_STD Phenotype
+#rclone -v copy divStats/correlation_plot_ROH_sh_vs_D_STD_Ann.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
  
 awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])print $0,a[$1];}' preprocess/USTA_Diversity_Study.bookSize divStats/rmdiag_conShare > divStats/rmdiag_conShare_wBooksize
 input_file="divStats/rmdiag_conShare_wBooksize"
 Rscript $scripts/plot_correlation_withColorsAndShapes.R "$input_file" ROH_sh D_STD Phenotype Book_Size
 rclone -v copy divStats/correlation_plot_ROH_sh_vs_D_STD_doubleAnn.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+
+## focus on F_ROH vs D_ROH
+awk 'BEGIN{FS=OFS="\t"}NR==FNR{a[$1]=$5;next}{print $0,a[$1]}' $Froh_stats <(cat $RM_diag | tr ',' '\t') > divStats/rmdiag_Froh
+awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])print $0,a[$1];}' preprocess/USTA_Diversity_Study.bookSize divStats/rmdiag_Froh > divStats/rmdiag_Froh_wBooksize
+input_file="divStats/rmdiag_Froh_wBooksize"
+Rscript $scripts/plot_correlation_withColorsAndShapes.R "$input_file" F_ROH D_ROH Phenotype Book_Size
+rclone -v copy divStats/correlation_plot_F_ROH_vs_D_ROH_doubleAnn.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+
+## focus on F_SNP vs D_ROH
+awk 'BEGIN{FS=OFS="\t"}NR==1{a[$2]="F_SNP";next}NR==FNR{a[$2]=$8;next}{print $0,a[$1]}' $het_stats <(cat $RM_diag | tr ',' '\t') > divStats/rmdiag_Fsnp
+awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])print $0,a[$1];}' preprocess/USTA_Diversity_Study.bookSize divStats/rmdiag_Fsnp > divStats/rmdiag_Fsnp_wBooksize
+input_file="divStats/rmdiag_Fsnp_wBooksize"
+Rscript $scripts/plot_correlation_withColorsAndShapes.R "$input_file" F_SNP D_ROH Phenotype Book_Size
+rclone -v copy divStats/correlation_plot_F_SNP_vs_D_ROH_doubleAnn.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+
+## focus on F_SNP vs F_ROH
+awk 'BEGIN{FS=OFS="\t"}NR==1{a[$2]="F_SNP";next}NR==FNR{a[$2]=$8;next}{print $0,a[$1]}' $het_stats divStats/rmdiag_Froh > divStats/rmdiag_Froh_Fsnp
+awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])print $0,a[$1];}' preprocess/USTA_Diversity_Study.bookSize divStats/rmdiag_Froh_Fsnp > divStats/rmdiag_Froh_Fsnp_wBooksize
+input_file="divStats/rmdiag_Froh_Fsnp_wBooksize"
+Rscript $scripts/plot_correlation_withColorsAndShapes.R "$input_file" F_SNP F_ROH Phenotype Book_Size
+rclone -v copy divStats/correlation_plot_F_SNP_vs_F_ROH_doubleAnn.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+
 
 ## Resume relatedness work ############################################
 ############################################
