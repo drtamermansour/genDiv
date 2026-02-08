@@ -12,8 +12,8 @@ out_prefix <- args[5];
 
 print("### --- 1. Load data ---");
 diag <- read.csv(file1, header=TRUE, comment.char="", stringsAsFactors=FALSE);
-names(diag)[names(diag) == "F_Standard"] <- "D_STD"
-names(diag)[names(diag) == "F_ROH"] <- "D_ROH"
+names(diag)[names(diag) == "D_STD"] <- "D_STD"
+names(diag)[names(diag) == "D_ROH"] <- "D_ROH"
 
 het  <- read.table(file2, header=TRUE, comment.char="", stringsAsFactors=FALSE);
 names(het)[names(het) == "F"] <- "F_SNP"

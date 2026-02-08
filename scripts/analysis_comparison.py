@@ -117,8 +117,8 @@ class RobustMatrixComparator:
         for i, iid in enumerate(self.common_ids):
             data.append({
                 'IID': iid,
-                'F_Standard': diag_std[i],
-                'F_ROH': diag_roh[i],
+                'D_STD': diag_std[i],
+                'D_ROH': diag_roh[i],
                 'Phenotype': self.pheno_map.get(str(iid), 'Unknown')
             })
         pd.DataFrame(data).to_csv(output_file, index=False)
