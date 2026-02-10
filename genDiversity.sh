@@ -953,12 +953,12 @@ grep -A3 "AFTER SMOOTHING" ${roh_RG}.consensus_${pct}pct.summary.txt
 roh_RG="divStats/roh.L3"; pct=25; 
 #rg="wholePop";
 for rg in "wholePop" "Trotter" "Pacer" "Trotter_LOW" "Trotter_MEDIUM" "Trotter_HIGH" "Pacer_LOW" "Pacer_MEDIUM" "Pacer_HIGH"; do 
-    consensus_pct=${roh_RG}.consensus_${pct}pct.merged.${rg}.smoothed.bed
-    consensus_size=$(awk 'BEGIN{sum=0} {sum+=($3-$2)} END {print sum}' ${consensus_pct})
-    bed_perSample="${roh_RG}.merged_per_sample.${rg}.bed"
+    consensus_bed=${roh_RG}.consensus_${pct}pct.merged.${rg}.smoothed.bed
+    consensus_size=$(awk 'BEGIN{sum=0} {sum+=($3-$2)} END {print sum}' ${consensus_bed})
+    bed_perSample="${roh_RG}.merged_per_sample.${rg}.bed"   ## no need to loop on ${rg} here. It should be the same if you always used "wholePop" 
     echo -e "IID\tTotal_ROH_in_Consensus_region(bp)\tPercent_of_Consensus_ROH" > ${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt
     cut -f4 "${bed_perSample}" | sort -u | while read S; do
-      awk -v s="$S" '$4==s' "${bed_perSample}" | sort -k1,1 -k2,2n | bedtools intersect -a stdin -b "${consensus_pct}" | awk -v s="$S" -v cs="$consensus_size" 'BEGIN{OFS="\t"}{size+=($3-$2)} END {print s, size, (size/cs)*100}'
+      awk -v s="$S" '$4==s' "${bed_perSample}" | sort -k1,1 -k2,2n | bedtools intersect -a stdin -b "${consensus_bed}" | awk -v s="$S" -v cs="$consensus_size" 'BEGIN{OFS="\t"}{size+=($3-$2)} END {print s, size, (size/cs)*100}'
     done >> ${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt
     #rclone -v copy ${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
 done
