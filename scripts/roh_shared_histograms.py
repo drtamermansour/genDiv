@@ -73,7 +73,7 @@ def create_roh_shared_histograms(file1_path, file2_path, output_path="roh_shared
     
     ax1.set_title('Pacer - Distribution of ROH_shared', 
                   fontsize=14, fontweight='bold', pad=15)
-    ax1.set_xlabel('ROH_shared', fontsize=12)
+    ax1.set_xlabel('ROH_shared (%)', fontsize=12)
     ax1.set_ylabel('Frequency', fontsize=12)
     ax1.grid(True, alpha=0.3, axis='y')
     ax1.legend(fontsize=10, title='Book Size', title_fontsize=11)
@@ -120,7 +120,7 @@ def create_roh_shared_histograms(file1_path, file2_path, output_path="roh_shared
     
     ax2.set_title('Trotter - Distribution of ROH_shared', 
                   fontsize=14, fontweight='bold', pad=15)
-    ax2.set_xlabel('ROH_shared', fontsize=12)
+    ax2.set_xlabel('ROH_shared (%)', fontsize=12)
     ax2.set_ylabel('Frequency', fontsize=12)
     ax2.grid(True, alpha=0.3, axis='y')
     ax2.legend(fontsize=10, title='Book Size', title_fontsize=11)
