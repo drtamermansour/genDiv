@@ -38,8 +38,8 @@ mkdir -p Miscellaneous_documents_standardbred
 docs="$(pwd)/Miscellaneous_documents_standardbred"
 #rclone -v copy "remote_UCDavis_GoogleDr:STR_Imputation_2025/Miscellaneous documents_standardbred/USTA_Gait_BookSize_Assignments_Sex_Added.xlsx" --drive-shared-with-me $docs/.
 rclone -v copy "remote_UCDavis_GoogleDr:STR_Imputation_2025/updated_resources/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.xlsx" --drive-shared-with-me $docs/.
-rclone -v copy "remote_UCDavis_GoogleDr:STR_Imputation_2025/updated_resources/trotters_toExclude.lst" --drive-shared-with-me $docs/.
-rclone -v copy "remote_UCDavis_GoogleDr:STR_Imputation_2025/updated_resources/pacers_toExclude.lst" --drive-shared-with-me $docs/.
+rclone -v copy "remote_UCDavis_GoogleDr:STR_Imputation_2025/updated_resources/QC excluded samples/trotters_toExclude.lst" --drive-shared-with-me $docs/.
+rclone -v copy "remote_UCDavis_GoogleDr:STR_Imputation_2025/updated_resources/QC excluded samples/pacers_toExclude.lst" --drive-shared-with-me $docs/.
 
 python3 - <<'EOF'
 import pandas as pd
