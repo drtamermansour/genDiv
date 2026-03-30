@@ -393,39 +393,39 @@ plink2 --vcf $vcf_filtered.norm.phased.vcf.gz --chr-set 31 no-y no-xy no-mt --al
 ##########################################
 ## LD pruning to get independent variants for diversity calculations (& and output as PLINK1 binary format)
 mkdir -p LD_pruned
-plink2 --pfile filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered \
+plink2 --vcf $vcf_filtered.norm.phased.vcf.gz --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
        --indep-pairwise 100kb 0.8 \
-       --real-ref-alleles --output-chr 'chrM' --out LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered.LD_lst ## 12253/57829 variants removed
+       --real-ref-alleles --output-chr 'chrM' --out LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.norm.phased.LD_lst ## 12147/57829 variants removed
 
-pl1_pruned="LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.LD_prune"
-plink2 --pfile filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered \
-       --extract LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered.LD_lst.prune.in \
+pl1_pruned="LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.norm.phased.LD_prune"
+plink2 --vcf $vcf_filtered.norm.phased.vcf.gz --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+       --extract LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.norm.phased.LD_lst.prune.in \
        --real-ref-alleles --make-bed --output-chr 'chrM' --out $pl1_pruned ## 45576 variants remaining
 
 
 ## Explore the LD-pruned dataset
 plink2 --bfile $pl1_pruned --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
       --het --missing --freq --hardy 'midp'  \
-      --output-chr 'chrM' --out inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.LD_prune.explore
-## check the change in (F) between: inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.LD_prune.explore.het | less ## F (i.e., measurement of inbreeding) decrease after pruning
+      --output-chr 'chrM' --out inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.norm.phased.LD_prune.explore
+
+## check the change in (F) between: inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.norm.phased.LD_prune.explore.het | less ## F (i.e., measurement of inbreeding) decrease after pruning
 
 ## Check final genotyping rate of the LD-pruned dataset
 plink2 --bfile $pl1_pruned --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
       --genotyping-rate --out $pl1_pruned.genotyping_rate ## Total (hardcall) genotyping rate is 0.997828.
 
 ## Convert to VCF format
-plink2 --pfile filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered \
-       --extract LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered.LD_lst.prune.in \
-       --real-ref-alleles --export vcf id-paste=iid --output-chr 'chrM' --out LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.LD_prune 
-vcf_pruned="LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.LD_prune.vcf"
+plink2 --vcf $vcf_filtered.norm.phased.vcf.gz --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+       --extract LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.norm.phased.LD_lst.prune.in \
+       --real-ref-alleles --export vcf id-paste=iid --output-chr 'chrM' --out LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.norm.phased.LD_prune 
+vcf_pruned="LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.norm.phased.LD_prune.vcf"
 
 # check ref alleles and positions of the VCFs
 grep -v '^##chrSet' $vcf_pruned | grep -E "^#|^chr" | bgzip --output $vcf_pruned.test.gz
 tabix $vcf_pruned.test.gz
 bcftools norm -c ws -f $ref $vcf_pruned.test.gz 1> $vcf_pruned.test.check.vcf 2> $vcf_pruned.test.check.log
-## Lines   total/split/joined/realigned/mismatch_removed/dup_removed/skipped:      45576/0/0/0/0/0/0
-## REF/ALT total/modified/added:   45576/0/0
-
+## Lines   total/split/joined/realigned/mismatch_removed/dup_removed/skipped:      45682/0/0/0/0/0/0
+## REF/ALT total/modified/added:   45682/0/0
 
 ############## Stats on diversity ##################
 mkdir -p divStats
