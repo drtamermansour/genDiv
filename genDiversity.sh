@@ -1,32 +1,8 @@
-## update the conda package manager itself
-conda update conda
+## Define the working directories
+work_dir=$(pwd)
+scripts="$(pwd)/scripts"
 
-## update all packages in an environment
-conda update --all
-
-## clean up unused packages and caches
-conda clean --all
-
-## create a new conda environment for genomic related GWAS tools
-mamba create -n genDiv conda-forge::r-base=4.5.2 conda-forge::r-ggplot2=4.0.1 conda-forge::r-gridextra=2.3 \
-              conda-forge::r-qqman=0.1.9 conda-forge::r-viridis=0.6.5 conda-forge::r-reshape2=1.4.5 \
-              conda-forge::r-ggally=2.4.0 conda-forge::openpyxl conda-forge::scikit-allel conda-forge::r-effsize=0.8.1 \
-              conda-forge::numpy conda-forge::pandas \
-              bioconda::plink bioconda::plink2 bioconda::bcftools bioconda::gcta bioconda::bedtools bioconda::beagle
-
-## Added 
-## conda-forge::numpy conda-forge::scikit-allel \
-## Missing        
-## conda-forge r-hierfstat=0.5_11 
-## conda-forge matplotlib=3.10.8 seaborn=0.13.2 scipy=1.17.0
-conda activate genDiv
-
-
-## Create the working directory of the project
-git clone git@github.com:drtamermansour/genDiv.git
-scripts="$HOME/genDiv/scripts"
-
-## Download genotyping data
+## Download genotyping data (PLINK: ped and map files)
 module load rclone ## Loading rclone/1.65.1
 mkdir -p SNPdata_iScan_Standardbred
 SNPdata="$(pwd)/SNPdata_iScan_Standardbred"
@@ -47,7 +23,7 @@ df = pd.read_excel("Miscellaneous_documents_standardbred/USTA_CuratedGait_BookSi
 df.to_csv("Miscellaneous_documents_standardbred/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv", index=False)
 EOF
 
-## create a tsv version of the metadat
+## create a tsv version of the metadata
 cat $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv | tr ' ' '_' | tr ',' '\t' > $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.tsv
 
 ## QC and preprocessingx
@@ -63,7 +39,7 @@ tail -n+2 $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_Compos
     cut -d"," -f1-5,7-8 | sort -t"," -k3,3 -k6,6 -k7,7 | \
     awk 'BEGIN{FS=","}{ key = $6 OFS $7 } seen[key]++ { print prev_line ORS $0; next } { prev_line = $0 }' | cut -d, -f1 | paste - - > preprocess/full_siblings
 
-## read genotypes
+## read genotypes (PLINK: bed + bim + fam files are writtin)
 plink --file $SNPdata/USTA_Diversity_Study --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
         --output-chr 'M' --out preprocess/USTA_Diversity_Study_noSex
 
@@ -85,37 +61,38 @@ plink --bfile preprocess/USTA_Diversity_Study_noSex_updatedIDs --chr-set 31 no-y
 
 ## Create ID lists
 awk 'BEGIN{FS=",";OFS="\t"}FNR==NR{a[$1]=$3;next}{if(a[$2])print $1,$2,a[$2];}' \
-    $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv preprocess/USTA_Diversity_Study.ids | grep -vFwf <(cat $docs/{trotters,pacers}_toExclude.lst) > preprocess/USTA_Diversity_Study.gait ## 559
+    $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv preprocess/USTA_Diversity_Study.ids | grep -vFwf <(cat $docs/{trotters,pacers}_toExclude.lst) > preprocess/USTA_Diversity_Study.gait ## 558
 
 awk 'BEGIN{FS=",";OFS="\t"}FNR==NR{a[$1]=$5;next}{if(a[$2])print $1,$2,a[$2];}' \
     $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv preprocess/USTA_Diversity_Study.ids > preprocess/USTA_Diversity_Study.bookSize ## 576
 
 awk 'BEGIN{FS=OFS="\t"} NR==FNR {a[$2]=$3;next}{if(a[$2])print $1,$2,a[$2]"_"$3}' \
-    preprocess/USTA_Diversity_Study.gait preprocess/USTA_Diversity_Study.bookSize > preprocess/USTA_Diversity_Study.gait_bookSize ## 559
+    preprocess/USTA_Diversity_Study.gait preprocess/USTA_Diversity_Study.bookSize > preprocess/USTA_Diversity_Study.gait_bookSize ## 558
+
 ##########################################
-## New remapping to EquCab3 coordinates
+## Remapping to EquCab3 coordinates
 ##########################################
 ## The mapping file of Equine80select markers in EquCab3 coordinates 
 ## chr \t pos \t snpID \t SNP_alleles \t genomic_alleles \t SNP_ref_alleles \t genomic_ref_allele \t allele_usage_decision
-## This map allows remapping to the same SNP alleles or PosStrand_alleles (i.e., VCF alleles). 
+## This map allows updating the input alleles (using their IDs) into the SNP_alleles (i.e., Manifest alleles) or genomic_alleles (i.e., Positive Strand alleles = VCF alleles). 
 ## In either case, their is a ref_allele to use in PLINK2
-equCab3_map=$(pwd)/../Equine80select_remapper/matchingSNPs_binary_consistantMapping.EquCab3_map
+equCab3_map=$(pwd)/../Equine80select_remapper/results/matchingSNPs_binary_consistantMapping.equCab3_map
 ## check if the SNP alleles in BIM match those in the equCab3_map file
-cat preprocess/USTA_Diversity_Study.bim | awk 'BEGIN{FS=OFS="\t"}{if($5 && $6){a[1]=$5;a[2]=$6;asort(a);print $2,a[1]","a[2]}}' > preprocess/tmpX_alleles_in_BIM.txt
-cat $equCab3_map | awk 'BEGIN{FS=OFS="\t"}{split($4, a, ",");asort(a);split($5, b, ",");asort(b);print $3,a[1]","a[2],b[1]","b[2]}' > preprocess/tmpX_alleles_in_MAP.txt
+cat preprocess/USTA_Diversity_Study.bim | awk 'BEGIN{FS=OFS="\t"}{if($5 && $6){a[1]=$5;a[2]=$6;asort(a);print $2,a[1]","a[2]}}' > preprocess/tmpX_alleles_in_BIM.txt ## e.g., "UKUL1_ilmndup1  A,G"
+cat $equCab3_map | awk 'BEGIN{FS=OFS="\t"}{split($4, a, ",");asort(a);split($5, b, ",");asort(b);print $3,a[1]","a[2],b[1]","b[2]}' > preprocess/tmpX_alleles_in_MAP.txt ## e.g., "21962991_Curly_f_ilmndup1       A,G     A,G"
 awk 'BEGIN{FS=OFS="\t"}FNR==NR{a[$1]=$2;next}{if(a[$1])print $1,a[$1],$2,$3;}' \
     preprocess/tmpX_alleles_in_BIM.txt preprocess/tmpX_alleles_in_MAP.txt > preprocess/tmpX_compare_BIM_MAP.txt ## SNP_ID \t BIM_alleles \t MAP_SNP_alleles \t MAP_genomic_alleles
 awk 'BEGIN{FS=OFS="\t"}{if($2!=$3)a+=1;if($2!=$4)b+=1;}END{print "mismatching SNP alleles:",a," mismatching genomic alleles:",b;}' preprocess/tmpX_compare_BIM_MAP.txt
-## mismatching SNP alleles:        36180    mismatching genomic alleles:   36900
+## mismatching SNP alleles:        35961    mismatching genomic alleles:   36685
 ## Let us remove the ambiguous SNPs (A/T or C/G) from the analysis to avoid strand issues
-awk 'BEGIN{FS=OFS="\t"}{if($4=="A,T" || $4=="T,A" || $4=="C,G" || $4=="G,C")print $3}' $equCab3_map > preprocess/ambiguous_snps.txt ## 279
+awk 'BEGIN{FS=OFS="\t"}{if($4=="A,T" || $4=="T,A" || $4=="C,G" || $4=="G,C")print $3}' $equCab3_map > preprocess/ambiguous_snps.txt ## 262
 ## Also, let us remove the SNPs on unplaced Scaffolds
 cat $equCab3_map | grep ^Un_NW | cut -f3 > preprocess/unplaced_snps.txt
 
 ## 1. select the variants to keep  
 ## 2. update chr/positions based on the equCab3_map
 ## 3. update -ve strand SNP alleles to postive strand version
-cut -f3 $equCab3_map | grep -v -f <(cat preprocess/ambiguous_snps.txt preprocess/unplaced_snps.txt) > preprocess/snps_to_remap.txt
+cut -f3 $equCab3_map | grep -v -f <(cat preprocess/ambiguous_snps.txt preprocess/unplaced_snps.txt) > preprocess/snps_to_remap.txt ## 79314
 awk 'BEGIN{FS=OFS="\t"}{print $5}' $equCab3_map | tr 'TCGA' 'AGCT' > preprocess/temp_pos_strand_complement.txt ## complementary genomic_alleles
 paste $equCab3_map preprocess/temp_pos_strand_complement.txt | awk 'BEGIN{FS=OFS="\t"}{print $3,$9,$5}' | tr ',' '\t' > preprocess/pos_strand_alleles.txt ## SNP_ID \t complementary_genomic_alleles \t genomic_alleles
 plink --bfile preprocess/USTA_Diversity_Study --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
@@ -123,7 +100,7 @@ plink --bfile preprocess/USTA_Diversity_Study --chr-set 31 no-y no-xy no-mt --al
     --update-chr $equCab3_map 1 3 \
     --update-map $equCab3_map 2 3 \
     --update-alleles preprocess/pos_strand_alleles.txt \
-    --make-bed --output-chr 'M' --out preprocess/USTA_Diversity_Study.remap ## 79259 ==> 77223 remaining
+    --make-bed --output-chr 'M' --out preprocess/USTA_Diversity_Study.remap ## input BIM has 79,259 ==> 76,841 remaining
 
 ## 4. update genomic alleles to fill in missing alleles (useless but just to be complete and make sure no snps will show up as mismtach in the next step)
 cat $equCab3_map | awk 'BEGIN{FS=OFS="\t"}{print $3,$5,$5}' | tr ',' '\t' > preprocess/genomic_alleles.txt ## SNP_ID \t genomic_alleles \t genomic_alleles
@@ -136,7 +113,7 @@ cat preprocess/USTA_Diversity_Study.remap.bim | awk 'BEGIN{FS=OFS="\t"}{a[1]=$5;
 awk 'BEGIN{FS=OFS="\t"}FNR==NR{a[$1]=$2;next}{if(a[$1])print $1,a[$1],$2,$3;}' \
     preprocess/tmpX_alleles_in_remap.BIM.txt preprocess/tmpX_alleles_in_MAP.txt > preprocess/tmpX_compare_remap.BIM_MAP.txt ## SNP_ID \t BIM_alleles \t MAP_SNP_alleles \t MAP_genomic_alleles
 awk 'BEGIN{FS=OFS="\t";a=b=0;}{if($2!=$3)a+=1;if($2!=$4)b+=1;}END{print "mismatching SNP alleles:",a," mismatching genomic alleles:",b;}' preprocess/tmpX_compare_remap.BIM_MAP.txt
-## mismatching SNP alleles:        35613    mismatching genomic alleles:   0
+## mismatching SNP alleles:        35417    mismatching genomic alleles:   0
 
 ###XXXXXXXXX 4. set ref alleles
 ##awk 'BEGIN{FS=OFS="\t"}{if($4!=$5)print $3,$4,$5}' $equCab3_map | tr ',' '\t' > preprocess/SNP_alleles.txt ## snpID \t SNP_alleles \t genomic_alleles
@@ -191,8 +168,8 @@ grep -v -Fwf dedup/keep_ids.txt dedup/all_dup_ids.txt > preprocess/remove_dup_id
 plink --bfile preprocess/USTA_Diversity_Study.remap --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
     --exclude preprocess/remove_dup_ids.txt --make-bed \
     --output-chr 'chrM' --out preprocess/USTA_Diversity_Study.remap.dedup
-# 77223 variants loaded from .bim file.
-# 71921 variants pass filters and QC.
+# 76841 variants loaded from .bim file.
+# 71548 variants pass filters and QC.
 
 ## Convert PLINK.1 files to PLINK.2 binary format
 plink2 --bfile preprocess/USTA_Diversity_Study.remap.dedup --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
@@ -211,8 +188,8 @@ plink2 --pfile preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2 \
       --output-chr 'chrM' --out inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.sex
 tail -n+2 inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.sex.sexcheck | tr ' ' '\t' | cut -f3-5 | sort | uniq -c
 #    285 1       1       OK
-#    248 2       2       OK
-#     43 2       NA      PROBLEM
+#    247 2       2       OK
+#     44 2       NA      PROBLEM
 
 ## Histogram of X chromosome inbreeding coefficients (output of preliminary --check-sex)
 awk -v size=0.05 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($6/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
@@ -267,25 +244,27 @@ plink2 --pfile preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2 \
 ## heterozygosity (Postive estimates indicate high homozygosity while negative estimates indicate low homozygosity.)
 awk -v size=0.02 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($6/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
                 END { for(i=bmin;i<=bmax;++i){if(i==0) print -1*size,size,a[i]/1;else if(i<0) print (i-1)*size,i*size,a[i]/1;else print i*size,(i+1)*size,a[i]/1 }}'  <(tail -n+2 inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het) > inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het.histo
-```
+
+: <<'COMMENT'
 -0.1    -0.08   3
 -0.08   -0.06   6
--0.06   -0.04   16
--0.04   -0.02   27
--0.02   0.02    114
-0.02    0.04    85
-0.04    0.06    96
-0.06    0.08    84
-0.08    0.1     60
-0.1     0.12    30
+-0.06   -0.04   17
+-0.04   -0.02   26
+-0.02   0.02    113
+0.02    0.04    89
+0.04    0.06    94
+0.06    0.08    82
+0.08    0.1     61
+0.1     0.12    31
 0.12    0.14    22
-0.14    0.16    12
+0.14    0.16    11
 0.16    0.18    11
 0.18    0.2     6
 0.2     0.22    2
 0.22    0.24    1
 0.24    0.26    1
-```
+COMMENT
+
 paste inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2_noPAR.sex.sexcheck inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het | cut -f1,2,4,6,9-12 | less
 paste inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2_noPAR.sex.sexcheck inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het | cut -f1,2,4,6,9-12 | awk -F"\t" '{if($3=="NA")print}' | sort -t $'\t' -k4,4g
 #cat inspect/AxiomGT1v2.explore.het | awk '{if($6>0.3)print}' >  inspect/AxiomGT1v2.explore.het.highHomo ## high homozygosity (i.e. low heterozygosity)
@@ -303,22 +282,22 @@ awk 'BEGIN{OFS="\t";}{ if($10<1e-50)a["1e-50 or less"]++;
                        else a["0.01 or more"]++; } \
                  END { for(i in a) print i,a[i] }'  <(tail -n+2 inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.hardy) | sort -g > inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.hardy.histo
 
-```
+: <<'COMMENT'
 1e-50 or less   17
 1e-40:1e-50     11
-1e-30:1e-40     32
-1e-20:1e-30     81
-1e-10:1e-20     604
+1e-30:1e-40     25
+1e-20:1e-30     79
+1e-10:1e-20     592
 1e-9:1e-10      197
-1e-8:1e-9       264
-1e-7:1e-8       422
-1e-6:1e-7       582
-1e-5:1e-6       718
-1e-4:1e-5       1253
-1e-3:1e-4       2004
-1e-2:1e-3       4043
-0.01 or more    58274
-```
+1e-8:1e-9       259
+1e-7:1e-8       419
+1e-6:1e-7       575
+1e-5:1e-6       713
+1e-4:1e-5       1241
+1e-3:1e-4       1987
+1e-2:1e-3       4015
+0.01 or more    57892
+COMMENT
 
 ## Use this to further explore variants with extreme deviation from HWE:
 cat inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.hardy | awk '{if(NR==1)print}{if($10<1e-50)print}' >  inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.hardy.lowHWE
@@ -354,79 +333,110 @@ plink2 --pfile preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2 \
 #--remove: 560 samples remaining.
 #560 samples (285 females, 275 males; 560 founders) remaining after main
 #0 samples removed due to missing genotype data (--mind).
-#--geno: 423 variants removed due to missing genotype data.
-#--hwe midp: 2048 variants removed due to Hardy-Weinberg exact test (founders only).
-# 7789 variants removed due to allele frequency threshold(s)
-# 58106 variants remaining after main filters.
+#--geno: 415 variants removed due to missing genotype data.
+#--hwe midp: 2029 variants removed due to Hardy-Weinberg exact test (founders only).
+# 7749 variants removed due to allele frequency threshold(s)
+# 57829 variants remaining after main filters.
 
 ## Check final genotyping rate
 plink2 --pfile filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered --genotyping-rate \
-       --out filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered.genotyping_rate ## Total (hardcall) genotyping rate is 0.997905.
+       --out filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered.genotyping_rate ## Total (hardcall) genotyping rate is 0.997906.
 
 ## Convert back to PLINK1 binary format for compatibility with other tools
+pl1_filtered="filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered"
 plink2 --pfile filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered \
-      --real-ref-alleles --make-bed --output-chr 'chrM' --out filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered
+      --real-ref-alleles --make-bed --output-chr 'chrM' --out $pl1_filtered
 
-
-## LD pruning to get independent variants for diversity calculations (& and output as PLINK1 binary format)
-mkdir -p LD_pruned
-plink2 --pfile filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered \
-       --indep-pairwise 100kb 0.8 \
-       --real-ref-alleles --output-chr 'chrM' --out LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered.LD_lst ## 12297/58106 variants removed
-
-plink2 --pfile filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered \
-       --extract LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered.LD_lst.prune.in \
-       --real-ref-alleles --make-bed --output-chr 'chrM' --out LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.LD_prune ## 45809 variants remaining
-
-
-## Explore the LD-pruned dataset
-plink2 --bfile LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.LD_prune --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-      --het --missing --freq --hardy 'midp'  \
-      --output-chr 'chrM' --out inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.LD_prune.explore
-## check the change in (F) between: inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.LD_prune.explore.het | less ## F (i.e., measurement of inbreeding) decrease after pruning
-
-## Check final genotyping rate of the LD-pruned dataset
-plink2 --bfile LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.LD_prune --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-      --genotyping-rate --out LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.LD_prune.genotyping_rate ## Total (hardcall) genotyping rate is 0.997687.
-
+##########################################
 ## Convert to VCF format
 plink2 --pfile filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered \
       --real-ref-alleles --export vcf id-paste=iid --output-chr 'chrM' --out filtered/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered
-
-plink2 --pfile filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered \
-       --extract LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered.LD_lst.prune.in \
-       --real-ref-alleles --export vcf id-paste=iid --output-chr 'chrM' --out LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.LD_prune 
-
-############## Stats on diversity ##################
-mkdir -p divStats
-pl1_filtered="filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered"
-pl1_pruned="LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.LD_prune"
-
 vcf_filtered="filtered/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.vcf"
-vcf_pruned="LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.LD_prune.vcf"
 
 
-# check ref alleles and positions
+# check ref alleles and positions of the VCFs
 ref="../Horse_parentage_SNPs/equCab3/download/equCab3.fa"
 
 grep -v '^##chrSet' $vcf_filtered | grep -E "^#|^chr" | bgzip --output $vcf_filtered.test.gz
 tabix $vcf_filtered.test.gz
 bcftools norm -c ws -f $ref $vcf_filtered.test.gz 1> $vcf_filtered.test.check.vcf 2> $vcf_filtered.test.check.log
-## Lines   total/split/joined/realigned/mismatch_removed/dup_removed/skipped:      58106/0/0/0/0/0/0
-## REF/ALT total/modified/added:   58106/0/0
+## Lines   total/split/joined/realigned/mismatch_removed/dup_removed/skipped:      57829/0/0/0/0/0/0
+## REF/ALT total/modified/added:   57829/0/0
 
+##########################################
+## Convert to phased VCF format
+## Prepare VCF for BEAGLE phasing and bcftools roh
+grep -v '^##chrSet' $vcf_filtered | grep -E "^#|^chr" | grep -v "^chrX" | bgzip --output $vcf_filtered.auto.gz
+tabix $vcf_filtered.auto.gz
+
+## Double check the vcf file
+bcftools norm \
+  --rm-dup exact \
+  -Oz \
+  -o $vcf_filtered.norm.vcf.gz \
+  $vcf_filtered.auto.gz ## Lines   total/split/joined/realigned/mismatch_removed/dup_removed/skipped:      57829/0/0/0/0/0/0
+tabix -p vcf $vcf_filtered.norm.vcf.gz
+
+## Run BEAGLE
+beagle gt=$vcf_filtered.norm.vcf.gz out=$vcf_filtered.norm.phased nthreads=10
+# Effective population size (Ne) is the number of individuals in an idealized population that would experience the same amount of genetic drift or inbreeding as the real, observed population. 
+# we should provide this number as an input to Beagle when imputing few samples in the mating app.
+grep "Estimated ne" $vcf_filtered.norm.phased.log | awk -F":" '{a+=$2}END{print "Ave. Estimated ne:",a/NR}' # Ave. Estimated ne: 2771.08
+tabix -p vcf $vcf_filtered.norm.phased.vcf.gz
+
+## Assess change in genotyping rate
+plink2 --vcf $vcf_filtered.norm.vcf.gz --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+      --genotyping-rate --out $vcf_filtered.norm.genotyping_rate ## Total (hardcall) genotyping rate is 0.997906.
+plink2 --vcf $vcf_filtered.norm.phased.vcf.gz --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+      --genotyping-rate --out $vcf_filtered.norm.phased.genotyping_rate ## Total (hardcall) genotyping rate is 1.
+
+##########################################
+## LD pruning to get independent variants for diversity calculations (& and output as PLINK1 binary format)
+mkdir -p LD_pruned
+plink2 --pfile filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered \
+       --indep-pairwise 100kb 0.8 \
+       --real-ref-alleles --output-chr 'chrM' --out LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered.LD_lst ## 12253/57829 variants removed
+
+pl1_pruned="LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.LD_prune"
+plink2 --pfile filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered \
+       --extract LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered.LD_lst.prune.in \
+       --real-ref-alleles --make-bed --output-chr 'chrM' --out $pl1_pruned ## 45576 variants remaining
+
+
+## Explore the LD-pruned dataset
+plink2 --bfile $pl1_pruned --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+      --het --missing --freq --hardy 'midp'  \
+      --output-chr 'chrM' --out inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.LD_prune.explore
+## check the change in (F) between: inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.LD_prune.explore.het | less ## F (i.e., measurement of inbreeding) decrease after pruning
+
+## Check final genotyping rate of the LD-pruned dataset
+plink2 --bfile $pl1_pruned --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+      --genotyping-rate --out $pl1_pruned.genotyping_rate ## Total (hardcall) genotyping rate is 0.997828.
+
+## Convert to VCF format
+plink2 --pfile filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered \
+       --extract LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered.LD_lst.prune.in \
+       --real-ref-alleles --export vcf id-paste=iid --output-chr 'chrM' --out LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.LD_prune 
+vcf_pruned="LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.LD_prune.vcf"
+
+# check ref alleles and positions of the VCFs
 grep -v '^##chrSet' $vcf_pruned | grep -E "^#|^chr" | bgzip --output $vcf_pruned.test.gz
 tabix $vcf_pruned.test.gz
 bcftools norm -c ws -f $ref $vcf_pruned.test.gz 1> $vcf_pruned.test.check.vcf 2> $vcf_pruned.test.check.log
-## Lines   total/split/joined/realigned/mismatch_removed/dup_removed/skipped:      45809/0/0/0/0/0/0
-## REF/ALT total/modified/added:   45809/0/0
+## Lines   total/split/joined/realigned/mismatch_removed/dup_removed/skipped:      45576/0/0/0/0/0/0
+## REF/ALT total/modified/added:   45576/0/0
+
+
+############## Stats on diversity ##################
+mkdir -p divStats
 
 ##########################################
 ## PCA Assessment 
 ##########################################
+## PCAs are called "loadings" because they represent the weights or coefficients that determine how much each original variable "loads" onto or contributes to a specific PC.
 pca_prefix="divStats/filtered.LD_prune.pca"
 plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-       --autosome --pca \
+       --real-ref-alleles --autosome --pca 'allele-wts' \
        --output-chr 'chrM' --out "$pca_prefix"
 
 rclone -v copy divStats --include "filtered.LD_prune.pca.eigen*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
@@ -439,34 +449,35 @@ Rscript -e 'args=(commandArgs(TRUE));'\
 'dev.off();' "$pca_prefix" "divStats/Var_PCs.jpg"
 rclone -v copy divStats/Var_PCs.jpg "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
+# Color samples on the PCA plots by Sex
 awk 'BEGIN{FS=OFS="\t";a["IID"]="sex"}NR==FNR{if($5==1)a[$2]="male";else a[$2]="female";next}{print $0,a[$2]}' $pl1_pruned.fam $pca_prefix.eigenvec > $pca_prefix.eigenvec.wSex
 eigenvec_suffix="wSex"; color_column="sex"; out_png="divStats/pca_plot_sex.png";
 Rscript scripts/pca_6plots.R "$pca_prefix" "$eigenvec_suffix" "$color_column" "$out_png"
 rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
+# Color samples on the PCA plots by Gait
 awk 'BEGIN{FS=OFS="\t";a["IID"]="Gait"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' preprocess/USTA_Diversity_Study.gait $pca_prefix.eigenvec > $pca_prefix.eigenvec.wGait
 eigenvec_suffix="wGait"; color_column="Gait"; out_png="divStats/pca_plot_Gait.png";
 Rscript scripts/pca_6plots.R "$pca_prefix" "$eigenvec_suffix" "$color_column" "$out_png"
 rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
+# Color samples on the PCA plots by Book Size
 awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' preprocess/USTA_Diversity_Study.bookSize $pca_prefix.eigenvec > $pca_prefix.eigenvec.wBook_Size
 eigenvec_suffix="wBook_Size"; color_column="Book_Size"; out_png="divStats/pca_plot_BookSize.png";
 Rscript scripts/pca_6plots.R "$pca_prefix" "$eigenvec_suffix" "$color_column" "$out_png"
 rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
-awk 'BEGIN{FS=OFS="\t";a["IID"]="COI"}NR==FNR{a[$2]=$8;next}{print $0,a[$2]}' <(tail -n+2 divStats/filtered.LD_prune.het_stats.het) $pca_prefix.eigenvec > $pca_prefix.eigenvec.wCOI
-eigenvec_suffix="wCOI"; color_column="COI"; out_png="divStats/pca_plot_inbreeding.png";
-Rscript scripts/pca_6plots_scaleColor.R "$pca_prefix" "$eigenvec_suffix" "$color_column" "$out_png"
-rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
-
 
 ## Identify Trotter samples segregating on PC2
-cat $pca_prefix.eigenvec | awk 'BEGIN{FS=OFS="\t"}{if($4<-0.1)print $2}' | grep -Fwf - $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv > divStats/Trotters_segregating_on_PC2.csv
+## After exlcusion of highly related animal, this subpopulation is segregating on PC4 (I keep the name of file on_PC2 to avoid confusion ) 
+cat $pca_prefix.eigenvec | awk 'BEGIN{FS=OFS="\t"}{if($6>0.1)print $2}' | grep -Fwf - $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv > divStats/Trotters_segregating_on_PC2.csv
 rclone -v copy divStats/Trotters_segregating_on_PC2.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 ## Identify Pacer samples co-segregating with Trotters on PC1
+## 10 samples; currently labeled as undefined.  
 cat $pca_prefix.eigenvec | awk 'BEGIN{FS=OFS="\t"}{if($3<0)print $2}' | grep -Fwf - $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv | grep "Pacer" > divStats/Pacers_cosegregating_withTrotters_on_PC1.csv
 rclone -v copy divStats/Pacers_cosegregating_withTrotters_on_PC1.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 ## Identify Trotter samples co-segregating with Pacers on PC1
+## 8 samples; currently labeled as undefined.  
 cat $pca_prefix.eigenvec | awk 'BEGIN{FS=OFS="\t"}{if($3>0)print $2}' | grep -Fwf - $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv | grep "Trotter" > divStats/Trotters_cosegregating_withPacers_on_PC1.csv
 rclone -v copy divStats/Trotters_cosegregating_withPacers_on_PC1.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
@@ -488,14 +499,10 @@ Rscript -e 'args=(commandArgs(TRUE));'\
 'dev.off();' "$pca_prefix_trot" "divStats/Var_PCs.Trotter.jpg"
 rclone -v copy divStats/Var_PCs.Trotter.jpg "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
+# Color samples on the PCA plots by Book Size
 awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' preprocess/USTA_Diversity_Study.bookSize $pca_prefix_trot.eigenvec > $pca_prefix_trot.eigenvec.wBook_Size
 eigenvec_suffix="wBook_Size"; color_column="Book_Size"; out_png="divStats/pca_plot_BookSize.Trotter.png";
 Rscript scripts/pca_3plots.R "$pca_prefix_trot" "$eigenvec_suffix" "$color_column" "$out_png"
-rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
-
-awk 'BEGIN{FS=OFS="\t";a["IID"]="COI"}NR==FNR{a[$2]=$8;next}{print $0,a[$2]}' <(tail -n+2 divStats/filtered.LD_prune.het_stats.het) $pca_prefix_trot.eigenvec > $pca_prefix_trot.eigenvec.wCOI
-eigenvec_suffix="wCOI"; color_column="COI"; out_png="divStats/pca_plot_inbreeding.Trotter.png";
-Rscript scripts/pca_3plots_scaleColor.R "$pca_prefix_trot" "$eigenvec_suffix" "$color_column" "$out_png"
 rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
 
@@ -516,17 +523,11 @@ Rscript -e 'args=(commandArgs(TRUE));'\
 'dev.off();' "$pca_prefix_pace" "divStats/Var_PCs.Pacer.jpg"
 rclone -v copy divStats/Var_PCs.Pacer.jpg "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
+# Color samples on the PCA plots by Book Size
 awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' preprocess/USTA_Diversity_Study.bookSize $pca_prefix_pace.eigenvec > $pca_prefix_pace.eigenvec.wBook_Size
 eigenvec_suffix="wBook_Size"; color_column="Book_Size"; out_png="divStats/pca_plot_BookSize.Pacer.png";
 Rscript scripts/pca_3plots.R "$pca_prefix_pace" "$eigenvec_suffix" "$color_column" "$out_png"
 rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
-
-awk 'BEGIN{FS=OFS="\t";a["IID"]="COI"}NR==FNR{a[$2]=$8;next}{print $0,a[$2]}' <(tail -n+2 divStats/filtered.LD_prune.het_stats.het) $pca_prefix_pace.eigenvec > $pca_prefix_pace.eigenvec.wCOI
-eigenvec_suffix="wCOI"; color_column="COI"; out_png="divStats/pca_plot_inbreeding.Pacer.png";
-Rscript scripts/pca_3plots_scaleColor.R "$pca_prefix_pace" "$eigenvec_suffix" "$color_column" "$out_png"
-rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
-
-
 
 ########################################################
 ## 1. Effective number of alleles (\(A_{e}\)) 
@@ -550,7 +551,7 @@ plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
 awk 'BEGIN{FS=OFS="\t"} NR==1{print $0,"A_e";next} {p1=$6; p2=1-p1; Ae=1/(p1*p1 + p2*p2); print $0,Ae}' "$pl1_pruned.freq_stats.afreq" > "$pl1_pruned.freq_stats.wholePop.afreq.Ae"
 awk -v pop="wholePop" 'BEGIN{FS=OFS="\t"} NR==1{next} {sum_Ae+=$NF; sumsq += $NF * $NF; n++} END \
     { if (n > 0) { mean_Ae = sum_Ae/n; sd_Ae = sqrt((sumsq/n - mean_Ae^2)); print "Mean_Ae_in_"pop, mean_Ae, "SD_Ae_in_"pop, sd_Ae } }' "$pl1_pruned.freq_stats.wholePop.afreq.Ae"
-#Mean_Ae_in_wholePop     1.5615  SD_Ae_in_wholePop       0.322002
+#Mean_Ae_in_wholePop     1.5616  SD_Ae_in_wholePop       0.321994
 
 ## Calculate \(A_{e}\) for each SNP per gait subpopulation
 group="gait"
@@ -558,7 +559,7 @@ plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
     --pheno preprocess/USTA_Diversity_Study.$group \
     --loop-cats 'PHENO1' --freq \
     --out "$pl1_pruned.freq_stats"
-#--loop-cats: Processing category 'Pacer' (272 samples).
+#--loop-cats: Processing category 'Pacer' (271 samples).
 #--loop-cats: Processing category 'Trotter' (271 samples).
 
 ## Calculate Mean \(A_{e}\) and standard deviation per gait subpopulation
@@ -567,8 +568,8 @@ for pop in Trotter Pacer; do
     awk -v pop=$pop 'BEGIN{FS=OFS="\t"} NR==1{next} {sum_Ae+=$NF; sumsq += $NF * $NF; n++} END \
         { if (n > 0) { mean_Ae = sum_Ae/n; sd_Ae = sqrt((sumsq/n - mean_Ae^2)); print "Mean_Ae_in_"pop, mean_Ae, "SD_Ae_in_"pop, sd_Ae } }' "$pl1_pruned.freq_stats.$pop.afreq.Ae"
 done
-#Mean_Ae_in_Trotter      1.53039 SD_Ae_in_Trotter        0.339742
-#Mean_Ae_in_Pacer        1.5504  SD_Ae_in_Pacer          0.331107
+#Mean_Ae_in_Trotter      1.53063 SD_Ae_in_Trotter        0.339752
+#Mean_Ae_in_Pacer        1.55017 SD_Ae_in_Pacer  0.331251
 
 ## Calculate \(A_{e}\) for each SNP per book size in each gait subpopulation
 plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
@@ -577,7 +578,7 @@ plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
     --out "$pl1_pruned.freq_stats"
 #--loop-cats: Processing category 'Pacer_HIGH' (75 samples).
 #--loop-cats: Processing category 'Pacer_LOW' (90 samples).
-#--loop-cats: Processing category 'Pacer_MEDIUM' (107 samples).
+#--loop-cats: Processing category 'Pacer_MEDIUM' (106 samples).
 #--loop-cats: Processing category 'Trotter_HIGH' (58 samples).
 #--loop-cats: Processing category 'Trotter_LOW' (96 samples).
 #--loop-cats: Processing category 'Trotter_MEDIUM' (117 samples).
@@ -590,12 +591,12 @@ for pop in Trotter Pacer; do
             { if (n > 0) { mean_Ae = sum_Ae/n; sd_Ae = sqrt((sumsq/n - mean_Ae^2)); print "Mean_Ae_in_"gp, mean_Ae, "SD_Ae_in_"gp, sd_Ae } }' "$pl1_pruned.freq_stats.${pop}_${book}.afreq.Ae"
     done
 done
-#Mean_Ae_in_Pacer_LOW    1.55146 SD_Ae_in_Pacer_LOW      0.330293
-#Mean_Ae_in_Pacer_MEDIUM 1.54858 SD_Ae_in_Pacer_MEDIUM   0.331486
-#Mean_Ae_in_Pacer_HIGH   1.53801 SD_Ae_in_Pacer_HIGH     0.338856
-#Mean_Ae_in_Trotter_LOW  1.53319 SD_Ae_in_Trotter_LOW    0.338905
-#Mean_Ae_in_Trotter_MEDIUM       1.53151 SD_Ae_in_Trotter_MEDIUM 0.340097
-#Mean_Ae_in_Trotter_HIGH 1.50634 SD_Ae_in_Trotter_HIGH   0.348257
+#Mean_Ae_in_Pacer_LOW    1.55141 SD_Ae_in_Pacer_LOW      0.330248
+#Mean_Ae_in_Pacer_MEDIUM 1.54804 SD_Ae_in_Pacer_MEDIUM   0.331937
+#Mean_Ae_in_Pacer_HIGH   1.53805 SD_Ae_in_Pacer_HIGH     0.338842
+#Mean_Ae_in_Trotter_LOW  1.53338 SD_Ae_in_Trotter_LOW    0.338901
+#Mean_Ae_in_Trotter_MEDIUM       1.53176 SD_Ae_in_Trotter_MEDIUM 0.340108
+#Mean_Ae_in_Trotter_HIGH 1.50661 SD_Ae_in_Trotter_HIGH   0.34827
 
 
 Rscript scripts/effAllele_stats.R &> divStats/effAllele_stats.txt
@@ -639,6 +640,8 @@ plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
 rclone -v copy divStats/filtered.LD_prune.fst_bookSize.Pacer.fst.summary "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
 
 Rscript scripts/fst_stats.R &> divStats/fst_stats.txt
+rclone -v copy divStats/fst_stats.txt "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
+
 ##########################################
 ## 3. Expected and observed heterozygosity and inbreeding coefficient
 ##########################################
@@ -672,6 +675,29 @@ rclone -v copy divStats --include "filtered.LD_prune.het_stats.het*" "remote_UCD
 #    --het --ibc \
 #    --out divStats/filtered.LD_prune.ibc_stats
 
+## PCA: Color samples on the PCA plots by COI
+# Whole population
+pca_prefix="divStats/filtered.LD_prune.pca"
+awk 'BEGIN{FS=OFS="\t";a["IID"]="COI"}NR==FNR{a[$2]=$8;next}{print $0,a[$2]}' <(tail -n+2 divStats/filtered.LD_prune.het_stats.het) $pca_prefix.eigenvec > $pca_prefix.eigenvec.wCOI
+eigenvec_suffix="wCOI"; color_column="COI"; out_png="divStats/pca_plot_inbreeding.png";
+Rscript scripts/pca_6plots_scaleColor.R "$pca_prefix" "$eigenvec_suffix" "$color_column" "$out_png"
+rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
+
+# Trotters only
+pca_prefix_trot="divStats/filtered.LD_prune.Trotter.pca"
+awk 'BEGIN{FS=OFS="\t";a["IID"]="COI"}NR==FNR{a[$2]=$8;next}{print $0,a[$2]}' <(tail -n+2 divStats/filtered.LD_prune.het_stats.het) $pca_prefix_trot.eigenvec > $pca_prefix_trot.eigenvec.wCOI
+eigenvec_suffix="wCOI"; color_column="COI"; out_png="divStats/pca_plot_inbreeding.Trotter.png";
+Rscript scripts/pca_3plots_scaleColor.R "$pca_prefix_trot" "$eigenvec_suffix" "$color_column" "$out_png"
+rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
+
+# Pacers only
+pca_prefix_pace="divStats/filtered.LD_prune.Pacer.pca"
+awk 'BEGIN{FS=OFS="\t";a["IID"]="COI"}NR==FNR{a[$2]=$8;next}{print $0,a[$2]}' <(tail -n+2 divStats/filtered.LD_prune.het_stats.het) $pca_prefix_pace.eigenvec > $pca_prefix_pace.eigenvec.wCOI
+eigenvec_suffix="wCOI"; color_column="COI"; out_png="divStats/pca_plot_inbreeding.Pacer.png";
+Rscript scripts/pca_3plots_scaleColor.R "$pca_prefix_pace" "$eigenvec_suffix" "$color_column" "$out_png"
+rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
+
+
 ##########################################
 # 4. Runs of homozygosity (ROH)
 ##########################################
@@ -679,7 +705,7 @@ group="gait"
 case="Trotter"
 
 ##########################################
-## 4A. ROH using Plink (Pruned dataset)
+## 4A. ROH using Plink (Pruned dataset) -- This is not actual useful. Only for testing the effect of pruning and using fewer count of markers 
 ##########################################
 ## Plink --homozyg
 ## By default, only runs of homozygosity containing at least 100 SNPs, and of total length ≥ 1000 kilobases, are noted. You can change these minimums with --homozyg-snp and --homozyg-kb, respectively.
@@ -714,9 +740,9 @@ awk 'NR > 1{ sum4 += $4; sum5 += $5; sum6 += $6 } END \
     Average of the total length of runs (kb) across all samples: %.2f\n \
     Average of the average length of runs (KBAVG) across all samples: %.2f\n", \
     sum4/count, sum5/count, sum6/count }' divStats/filtered.LD_prune.roh_$group.hom.indiv
-##Average Number of runs of homozygosity (NSEG) : 16.67 
-##Average of the total length of runs (kb) across all samples: 175,814.49
-##Average of the average length of runs (KBAVG) across all samples: 10,462.76
+##Average Number of runs of homozygosity (NSEG) : 15.63 
+##Average of the total length of runs (kb) across all samples: 164,427.23
+##Average of the average length of runs (KBAVG) across all samples: 10,439.76
 
 
 ## Rscript that plots the correlation between "KB" and "KBAVG" from .hom.indiv and the difference O(HET) and E(HET), and F columns from .het
@@ -740,9 +766,9 @@ awk 'NR > 1{ sum4 += $4; sum5 += $5; sum6 += $6 } END \
     Average of the total length of runs (kb) across all samples: %.2f\n \
     Average of the average length of runs (KBAVG) across all samples: %.2f\n", \
     sum4/count, sum5/count, sum6/count }' divStats/filtered.not_pruned.roh_$group.hom.indiv
-##Average Number of runs of homozygosity (NSEG) : 33.92
-##Average of the total length of runs (kb) across all samples: 353,232.97
-##Average of the average length of runs (KBAVG) across all samples: 10,361.83
+##Average Number of runs of homozygosity (NSEG) : 33.35
+##Average of the total length of runs (kb) across all samples: 345,017.70
+##Average of the average length of runs (KBAVG) across all samples: 10,305.44
 
 
 ## Rscript that plots the correlation between  KB and KBAVG from .hom.indiv and the difference O(HET) and E(HET), and F columns from .het
@@ -779,40 +805,78 @@ Rscript scripts/correlation_plot_multiway.R $roh_indiv $het_stats $out_prefix
 rclone -v copy $out_prefix.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/plink_filtered_gp/" --drive-shared-with-me
 #rclone -v copy divStats/$out_prefix.correlation_heatmap.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/plink_filtered_gp/" --drive-shared-with-me
 
+############################################
+## 4D. Studying ROH using Howard et al. (2016) approach -- This was for testing only and is not currently in use
+############################################
+mkdir -p $work_dir/rep_ROHRM
+rohrm_dir="$work_dir/rep_ROHRM"
+
+## ROH Analysis with Sub-populations and Phenotypes
+## Having a headerless tab-separated file with 3 columns: The 2nd column has subject ids matching the VCF and the 3rd column has the a binary phenotype, let us do the following:
+## 1. ROH Calling (Per Individual): We will implement a scanner that checks hap1 == hap2. Any contiguous stretch of matching haplotypes longer than the cutoff (e.g., 1 Mb) is flagged as an ROH.
+## 2. Island Detection: We will calculate the frequency of ROHs at every SNP, find the "Top 5%" cutoff, and merge contiguous high-frequency SNPs into "Islands".
+##    i.e., an "ROH Island" is defined strictly as a contiguous block of SNPs where every single SNP is in the Top 5% of frequencies.
+## 3. Phenotype Integration: the analysis will be repeated for sub-populations defined in the phenotype file).
+## 4. make a plot to show the ROH frequency across the genome for the whole population and each sub-population.
+## 5. Calc the average (±SD) proportion of the genome in a ROH for the whole population and each sub-population.
+
+roh_mb_cutoff=1.0  # in Megabases (Mb)
+phenotypes="preprocess/USTA_Diversity_Study.gait"
+python $scripts/ROH_analysis.py $vcf_filtered.norm.phased.vcf.gz $phenotypes $roh_mb_cutoff "$rohrm_dir" > $rohrm_dir/ROH_analysis.$roh_mb_cutoff.log
+
+rclone -v copy $rohrm_dir/ROH_Frequency_Plot.$roh_mb_cutoff.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
+rclone -v copy $rohrm_dir/ROH_Islands_Detailed.$roh_mb_cutoff.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
+#rclone -v copy $rohrm_dir/ROH_Subpop_Stats.$roh_mb_cutoff.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
+rclone -v copy $rohrm_dir/ROH_analysis.$roh_mb_cutoff.log "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
+
+
+tail -n+2 $rohrm_dir/ROH_Islands_Detailed.1.0.csv | awk -F"," '{sum += $5; array[NR] = $5} END {
+    mean = sum / NR;
+    for (x=1; x<=NR; x++) {
+        sumsq += ((array[x] - mean)**2);
+    }
+    std_dev = sqrt(sumsq / NR); # Population standard deviation
+    # For sample standard deviation, use sqrt(sumsq / (NR - 1)) if NR > 1
+    min_snp_cutoff = mean - (2 * std_dev)
+
+    print "Mean: " mean;
+    print "Standard Deviation: " std_dev
+    print "2 SD below Mean: " min_snp_cutoff
+}' ## Mean: 28.6454 // Standard Deviation: 41.1817 // 2 SD below Mean: -53.7179 //There is no need to filter based on this criterion as it results in a negative value. As an alternative, we can use 3 as a minimum SNP count threshold for defining ROH islands.
+
+## Filter ROH islands with at least 3 SNPs
+awk -F"," 'NR==1 || $5 >= 3' $rohrm_dir/ROH_Islands_Detailed.1.0.csv > $rohrm_dir/Filtered_ROH_Islands_Detailed.1.0.csv
+## for each sub-population in column 1, calculate the number of ROH regions (NR), the total length of ROH islands (sum of $4-$3), the average length, and the maximum and average SNP frequency (column 6)
+awk -F"," 'NR>1 && $1!="" {
+    grp=$1
+    if (!(grp in seen)) { seen[grp]=1; order[++norder]=grp }
+    len = ($4 - $3) + 0
+    freq = ($6 + 0)
+    count[grp]++
+    sumlen[grp] += len
+    sumfreq[grp] += freq
+    if (!(grp in maxfreq) || freq > maxfreq[grp]) maxfreq[grp] = freq
+}
+END {
+    print "Group,NR,Total_len_bp,Avg_len_bp,Max_freq,Avg_freq"
+    for(i=1;i<=norder;i++) {
+        g = order[i]
+        printf "%s,%d,%.0f,%.2f,%.6f,%.6f\n", g, count[g], sumlen[g], sumlen[g]/count[g], maxfreq[g], sumfreq[g]/count[g]
+    }
+}' $rohrm_dir/Filtered_ROH_Islands_Detailed.1.0.csv > $rohrm_dir/Filtered_ROH_Subpop_Stats.csv
+
+rclone -v copy $rohrm_dir/Filtered_ROH_Subpop_Stats.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
+#python $scripts/ROH_analysis_withFilter.py filtered.norm.phased.vcf.gz phenotypes.txt $roh_mb_cutoff > Filtered_ROH_analysis.$roh_mb_cutoff.log
+
 ##########################################
-# 4D. ROH using bcftools/roh (Filtered dataset without LD pruning)
+# 4E. ROH using bcftools/roh (Filtered dataset without LD pruning) -- This is the final approved approach
 ##########################################
-## Prepare VCF for BEAGLE phasing and bcftools roh
-grep -v '^##chrSet' $vcf_filtered | grep -E "^#|^chr" | grep -v "^chrX" | bgzip --output $vcf_filtered.auto.gz
-tabix $vcf_filtered.auto.gz
-
-## for some reason, we still have 28 duplicate SNPs after previous deduplication steps, so we need to remove them here again
-bcftools norm \
-  --rm-dup exact \
-  -Oz \
-  -o $vcf_filtered.norm.vcf.gz \
-  $vcf_filtered.auto.gz ## Lines   total/split/joined/realigned/mismatch_removed/dup_removed/skipped:      58106/0/0/0/0/28/0
-tabix -p vcf $vcf_filtered.norm.vcf.gz
-
-## Run BEAGLE
-beagle gt=$vcf_filtered.norm.vcf.gz out=$vcf_filtered.norm.phased nthreads=10
-# Effective population size (Ne) is the number of individuals in an idealized population that would experience the same amount of genetic drift or inbreeding as the real, observed population. 
-# we should provide this number as an input to Beagle when imputing few samples in the mating app.
-grep "Estimated ne" $vcf_filtered.norm.phased.log | awk -F":" '{a+=$2}END{print "Ave. Estimated ne:",a/NR}' # Ave. Estimated ne: 2736.53
-tabix -p vcf $vcf_filtered.norm.phased.vcf.gz
-
-## Assess change in genotyping rate
-plink2 --vcf $vcf_filtered.norm.vcf.gz --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-      --genotyping-rate --out $vcf_filtered.norm.genotyping_rate ## Total (hardcall) genotyping rate is 0.997905.
-plink2 --vcf $vcf_filtered.norm.phased.vcf.gz --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-      --genotyping-rate --out $vcf_filtered.norm.phased.genotyping_rate ## Total (hardcall) genotyping rate is 1.
-
 ## Run bcftools roh
 bcftools roh -G30 --estimate-AF - $vcf_filtered.norm.phased.vcf.gz -o divStats/roh_out.txt
 ##Number of target samples: 560
 ##Number of --estimate-AF samples: 560
 ##Number of sites in the buffer/overlap: unlimited
-##Number of lines total/processed: 58106/58106
+##Number of lines total/processed: 57829/57829 (old: 58106/58106)
 ##Number of lines filtered/no AF/no alt/multiallelic/dup: 0/0/0/0/0
 
 ## Visualize the raw ROH results 
@@ -827,9 +891,9 @@ awk 'NR > 1{ sum2 += $2; sum3 += $3; sum4 += $4 } END \
     Average of the total length of runs (kb) across all samples: %.2f\n \
     Average of the average length of runs (KBAVG) across all samples: %.2f\n", \
     sum2/count, sum3/count, sum4/count }' divStats/roh_summary_by_RG.txt
-##Average Number of runs of homozygosity (NSEG) : 86.73
-##Average of the total length of runs (kb) across all samples: 456,615.05
-##Average of the average length of runs (KBAVG) across all samples: 5,252.78
+##Average Number of runs of homozygosity (NSEG) : 86.53
+##Average of the total length of runs (kb) across all samples: 456,016.51
+##Average of the average length of runs (KBAVG) across all samples: 5,256.67
 
 ## filtration to match the PLINK quality suggestions 
 #Minimum ROH length (--homozyg-kb) 1000 kb
@@ -853,10 +917,11 @@ OUTPUT_FILE="divStats/roh.L3_gait.sumStats.csv"
 python scripts/summary_roh.py -i "$INPUT_ROH" -o "$OUTPUT_FILE"
 rclone -v copy divStats/roh.L3_gait.sumStats.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
 #Subgroup,          N,      NSEG,           KB,                         KBAVG
-#Whole Population,  560,    54.76 +/- 9.43, 413742.23 +/- 103226.33,    7519.37 +/- 1207.08
-#Pacer,             272,    50.60 +/- 7.14, 380853.04 +/- 81937.62,     7516.39 +/- 1218.77
-#Trotter,           271,    59.41 +/- 9.04, 452182.35 +/- 105540.44,    7574.71 +/- 1163.28
-#undefined,         17,     47.24 +/- 12.00,327188.60 +/- 138654.02,    6684.62 +/- 1455.38
+#Whole Population,  560,    54.58 +/- 9.43, 413086.61 +/- 103171.97,    7533.22 +/- 1210.63
+#Pacer,             271,    50.34 +/- 7.11, 379860.14 +/- 81886.48,     7535.88 +/- 1224.94
+#Trotter,           271,    59.28 +/- 9.02, 451519.43 +/- 105452.45,    7580.75 +/- 1166.36
+#undefined,         18,     47.67 +/- 11.92,334702.03 +/- 138748.03,    6777.52 +/- 1454.36
+
 
 ## Rscript that plots the correlation between KB and KBAVG from .hom.indiv and the difference O(HET) and E(HET), and F columns from .het
 ## Similar analysis will be done later after calculation of related matrices
@@ -978,69 +1043,6 @@ for rg in "Trotter_LOW" "Trotter_MEDIUM" "Trotter_HIGH" "Pacer_LOW" "Pacer_MEDIU
 done >> ${roh_RG}.perSample_intersect_threeBooksize_consensus_${pct}pct.summary.txt  
 
 ############################################
-## 4E. Studying ROH using Howard et al. (2016) approach
-############################################
-mkdir -p $HOME/genDiv/rep_ROHRM
-rohrm_dir="rep_ROHRM"
-
-## ROH Analysis with Sub-populations and Phenotypes
-## Having a headerless tab-separated file with 3 columns: The 2nd column has subject ids matching the VCF and the 3rd column has the a binary phenotype, let us do the following:
-## 1. ROH Calling (Per Individual): We will implement a scanner that checks hap1 == hap2. Any contiguous stretch of matching haplotypes longer than the cutoff (e.g., 1 Mb) is flagged as an ROH.
-## 2. Island Detection: We will calculate the frequency of ROHs at every SNP, find the "Top 5%" cutoff, and merge contiguous high-frequency SNPs into "Islands".
-##    i.e., an "ROH Island" is defined strictly as a contiguous block of SNPs where every single SNP is in the Top 5% of frequencies.
-## 3. Phenotype Integration: the analysis will be repeated for sub-populations defined in the phenotype file).
-## 4. make a plot to show the ROH frequency across the genome for the whole population and each sub-population.
-## 5. Calc the average (±SD) proportion of the genome in a ROH for the whole population and each sub-population.
-
-roh_mb_cutoff=1.0  # in Megabases (Mb)
-phenotypes="preprocess/USTA_Diversity_Study.gait"
-python $scripts/ROH_analysis.py $vcf_filtered.norm.phased.vcf.gz $phenotypes $roh_mb_cutoff "$rohrm_dir" > $rohrm_dir/ROH_analysis.$roh_mb_cutoff.log
-
-rclone -v copy $rohrm_dir/ROH_Frequency_Plot.$roh_mb_cutoff.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
-rclone -v copy $rohrm_dir/ROH_Islands_Detailed.$roh_mb_cutoff.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
-#rclone -v copy $rohrm_dir/ROH_Subpop_Stats.$roh_mb_cutoff.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
-rclone -v copy $rohrm_dir/ROH_analysis.$roh_mb_cutoff.log "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
-
-
-tail -n+2 $rohrm_dir/ROH_Islands_Detailed.1.0.csv | awk -F"," '{sum += $5; array[NR] = $5} END {
-    mean = sum / NR;
-    for (x=1; x<=NR; x++) {
-        sumsq += ((array[x] - mean)**2);
-    }
-    std_dev = sqrt(sumsq / NR); # Population standard deviation
-    # For sample standard deviation, use sqrt(sumsq / (NR - 1)) if NR > 1
-    min_snp_cutoff = mean - (2 * std_dev)
-
-    print "Mean: " mean;
-    print "Standard Deviation: " std_dev
-    print "2 SD below Mean: " min_snp_cutoff
-}' ## Mean: 28.6454 // Standard Deviation: 41.1817 // 2 SD below Mean: -53.7179 //There is no need to filter based on this criterion as it results in a negative value. As an alternative, we can use 3 as a minimum SNP count threshold for defining ROH islands.
-
-## Filter ROH islands with at least 3 SNPs
-awk -F"," 'NR==1 || $5 >= 3' $rohrm_dir/ROH_Islands_Detailed.1.0.csv > $rohrm_dir/Filtered_ROH_Islands_Detailed.1.0.csv
-## for each sub-population in column 1, calculate the number of ROH regions (NR), the total length of ROH islands (sum of $4-$3), the average length, and the maximum and average SNP frequency (column 6)
-awk -F"," 'NR>1 && $1!="" {
-    grp=$1
-    if (!(grp in seen)) { seen[grp]=1; order[++norder]=grp }
-    len = ($4 - $3) + 0
-    freq = ($6 + 0)
-    count[grp]++
-    sumlen[grp] += len
-    sumfreq[grp] += freq
-    if (!(grp in maxfreq) || freq > maxfreq[grp]) maxfreq[grp] = freq
-}
-END {
-    print "Group,NR,Total_len_bp,Avg_len_bp,Max_freq,Avg_freq"
-    for(i=1;i<=norder;i++) {
-        g = order[i]
-        printf "%s,%d,%.0f,%.2f,%.6f,%.6f\n", g, count[g], sumlen[g], sumlen[g]/count[g], maxfreq[g], sumfreq[g]/count[g]
-    }
-}' $rohrm_dir/Filtered_ROH_Islands_Detailed.1.0.csv > $rohrm_dir/Filtered_ROH_Subpop_Stats.csv
-
-rclone -v copy $rohrm_dir/Filtered_ROH_Subpop_Stats.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
-#python $scripts/ROH_analysis_withFilter.py filtered.norm.phased.vcf.gz phenotypes.txt $roh_mb_cutoff > Filtered_ROH_analysis.$roh_mb_cutoff.log
-
-############################################
 ## 5. F_ROH statistic (currently calculated based on bacftools roh)
 ############################################
 ## F_ROH is an inbreeding coefficient based on runs of homozygosity
@@ -1099,7 +1101,7 @@ done &> divStats/roh_sh.log
 ## divStats/ROHshared_${gp}
 
 ############################################
-## x. Nucleotide diversity statistic (pi)
+## x. Nucleotide diversity statistic (pi) -- This section is under development
 ############################################
 ## Nucleotide diversity is a population-level metric, the average number of differences between a pair of chromosomes, across all chromosome combinations within the population.
 ## This is distinct from simply measuring heterozygosity. 
@@ -1111,6 +1113,10 @@ done &> divStats/roh_sh.log
 ############################################
 ## 6. Relatedness work
 ############################################
+mkdir -p $work_dir/rep_ROHRM
+rohrm_dir="$work_dir/rep_ROHRM"
+group="gait"
+phenotypes="preprocess/USTA_Diversity_Study.gait"
 
 
 ############################################
@@ -1144,7 +1150,7 @@ plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
     # d. Accumulate these scores into the global matrix.
     # Note: Again, we optimize the C++ nested loops by using NumPy Broadcasting instead.
 # Stage 5 (Normalization): Scale the matrix and save it.
-```
+: <<'COMMENT'
 Feature,            Standard GRM (VanRaden),                    ROH GRM (Howard et al.)
 Input Data,         "Unphased Genotypes (0, 1, 2)",             Phased Haplotypes (0|0, 0|1, 1|0, 1|1)
 Resolution,         Single Nucleotide (SNP),                    Multi-Megabase Window (Window)
@@ -1152,18 +1158,19 @@ Matching Logic,     Allele Sharing (IBS),                       Exact String Mat
 Sensitivity,        Very tolerant of mutation/recombination.,   Very strict. One mismatch breaks the link.
 Biological Signal,  Captures Deep/Ancient Relatedness.,         Captures Recent Relatedness.
 Diagonal,           Heterozygosity-based Inbreeding.,           ROH-based Inbreeding (FROH​).
-```
+COMMENT
+
 roh_mb_cutoff=1.0  # in Megabases (Mb)
 roh_threshold=3.0  # in Standard Deviations (SD)
 python $scripts/ROHRM_Creator.py $vcf_filtered.norm.phased.vcf.gz $roh_mb_cutoff $roh_threshold "$rohrm_dir" > $rohrm_dir/ROHRM.rohMinSize_$roh_mb_cutoff.rohThreshold_$roh_threshold.log
-## Stats: Mean=27.88, SD=5.11
-## Cutoff Calculated: 13 SNPs
-## Windows filtered: 57243 -> 56890 remaining.
+## Stats: Mean=27.80, SD=5.22
+## Cutoff Calculated: 12 SNPs
+## Windows filtered: 56967 -> 56646 remaining.
 
 ############################################
 ## Compare Genomic Relatedness and ROH-based Relatedness 
 ############################################
-## compares the ROH-based matrix against a Standard vanraden Genomic Relationship Matrix ($G_{STD}$) 
+## compares the ROH-based matrix against a Standard vanraden Genomic Relationship Matrix ($G_{SNP}, previously named $G_{STD}$) 
 ## to demonstrate that $G_{ROH}$ captures different genetic signals (recent ancestry vs. deep ancestry).
 
 ## Old version comparing with vanraden GRM implementation. Also, no QC of ID matching and simplified plotting
@@ -1178,11 +1185,11 @@ python $scripts/ROHRM_Creator.py $vcf_filtered.norm.phased.vcf.gz $roh_mb_cutoff
 ## The script outputs "Robust_Matrix_Comparison_Enhanced.png", "Pairwise_Differences.csv", and "Inbreeding_Comparison.csv"
 ## python analysis_comparison.py <ROH_Prefix> <Std_Prefix> <Phenotypes_File> <output_dir>
 python $scripts/analysis_comparison.py $rohrm_dir/ROHRM.rohMinSize_$roh_mb_cutoff.rohThreshold_$roh_threshold $rohrm_dir/filtered.LD_prune.GRM_$group $phenotypes "$rohrm_dir"
-#Correlation (Inbreeding): r = -0.1777
-#Correlation (Relationships): r = 0.9312
+#Correlation (Inbreeding): r = -0.1761
+#Correlation (Relationships): r = 0.9313
 #Correlations per Subpopulation:
-#  > Trotter: r = -0.1257
-#  > Pacer: r = 0.2114
+#  > Trotter: r = -0.1254
+#  > Pacer: r = 0.2181
 
 # center column 7 (Difference) around the column's mean and save to new column centered_Kinship_diff
 awk -F, 'BEGIN{OFS=FS=","} NR==1{hdr=$0; next} {sum+=$7; n++; lines[n]=$0; vals[n]=$7} \
@@ -1198,13 +1205,13 @@ awk -v size=0.01 'BEGIN{FS=",";OFS="\t";bmin=bmax=0}{ b=int($8/size); a[b]++; bm
                     END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(tail -n+2 $rohrm_dir/Pairwise_Differences.csv) > $rohrm_dir/Pairwise_Differences.Kinship_diff.histo
 
 ## animal pairs with high positive kinship difference (ROH-based kinship is higher relative to standard kinship)
-cat $rohrm_dir/Pairwise_Differences.csv | awk 'BEGIN{FS=","} NR==1{print;next}{if($8>0.1) print}'| head #> high_positive_kinship_diff.csv
+cat $rohrm_dir/Pairwise_Differences.csv | awk 'BEGIN{FS=","} NR==1{print;next}{if($8>0.1) print}' > high_positive_kinship_diff.csv
 ## animal pairs with high negative kinship difference (ROH-based kinship is lower relative to standard kinship)
-cat $rohrm_dir/Pairwise_Differences.csv | awk 'BEGIN{FS=","} NR==1{print;next}{if($8<-0.15) print}'| head #> high_negative_kinship_diff.csv
+cat $rohrm_dir/Pairwise_Differences.csv | awk 'BEGIN{FS=","} NR==1{print;next}{if($8<-0.15) print}' > high_negative_kinship_diff.csv
 
-cat $rohrm_dir/Pairwise_Differences.csv | grep "Trotter" | grep "Pacer" | awk 'BEGIN{FS=","} {sum+=$8; n++} END{print sum/n}'  # average centered kinship difference between Trotter and Pacer: 0.00230583
-cat $rohrm_dir/Pairwise_Differences.csv | grep "Trotter" | grep -v "Pacer" | awk 'BEGIN{FS=","} {sum+=$8; n++} END{print sum/n}'  # average centered kinship difference between Trotters: 0.0231494 (i.e., ROH-based kinship is relatively higher than standard kinship on average for Trotters)
-cat $rohrm_dir/Pairwise_Differences.csv | grep -v "Trotter" | grep "Pacer" | awk 'BEGIN{FS=","} {sum+=$8; n++} END{print sum/n}'  # average centered kinship difference between Pacers: -0.0275908 (i.e., standard kinship is relatively higher than ROH-based kinship on average for Pacers)
+cat $rohrm_dir/Pairwise_Differences.csv | grep "Trotter" | grep "Pacer" | awk 'BEGIN{FS=","} {sum+=$8; n++} END{print sum/n}'  # average centered kinship difference between Trotter and Pacer: 0.00221356
+cat $rohrm_dir/Pairwise_Differences.csv | grep "Trotter" | grep -v "Pacer" | awk 'BEGIN{FS=","} {sum+=$8; n++} END{print sum/n}'  # average centered kinship difference between Trotters: 0.0231847 (i.e., ROH-based kinship is relatively higher than standard kinship on average for Trotters)
+cat $rohrm_dir/Pairwise_Differences.csv | grep -v "Trotter" | grep "Pacer" | awk 'BEGIN{FS=","} {sum+=$8; n++} END{print sum/n}'  # average centered kinship difference between Pacers: -0.0276282 (i.e., standard kinship is relatively higher than ROH-based kinship on average for Pacers)
 
 # upload results
 rclone -v copy $rohrm_dir/Robust_Matrix_Comparison_Enhanced.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/roh_1Mb.Threshold_3SD/" --drive-shared-with-me
@@ -1221,11 +1228,11 @@ roh_mb_cutoff=5.0  # in Megabases (Mb)
 roh_threshold=3.0  # in Standard Deviations (SD)
 python $scripts/ROHRM_Creator.py $vcf_filtered.norm.phased.vcf.gz $roh_mb_cutoff $roh_threshold "$rohrm_dir" > $rohrm_dir/ROHRM.rohMinSize_$roh_mb_cutoff.rohThreshold_$roh_threshold.log
 python $scripts/analysis_comparison.py $rohrm_dir/ROHRM.rohMinSize_$roh_mb_cutoff.rohThreshold_$roh_threshold $rohrm_dir/filtered.LD_prune.GRM_$group $phenotypes "$rohrm_dir"
-# Global Correlation (Inbreeding): r = -0.0374
+# Global Correlation (Inbreeding): r = -0.0358
 # Global Correlation (Relationships): r = 0.9394
 #Correlations per Subpopulation:
-#  > Trotter: r = -0.0177
-#  > Pacer: r = 0.2608
+#  > Trotter: r = -0.0176
+#  > Pacer: r = 0.2651
 awk -F, 'BEGIN{OFS=FS=","} NR==1{hdr=$0; next} {sum+=$7; n++; lines[n]=$0; vals[n]=$7} \
          END{ mean = (n?sum/n:0); print hdr, "centered_Kinship_diff"; \
               for(i=1;i<=n;i++) printf "%s%s%.8f\n", lines[i], OFS, vals[i]-mean }' $rohrm_dir/Pairwise_Differences.csv > $rohrm_dir/Pairwise_Differences.csv.tmp && mv $rohrm_dir/Pairwise_Differences.csv.tmp $rohrm_dir/Pairwise_Differences.csv
@@ -1239,11 +1246,11 @@ roh_mb_cutoff=10.0  # in Megabases (Mb)
 roh_threshold=3.0  # in Standard Deviations (SD)
 python $scripts/ROHRM_Creator.py $vcf_filtered.norm.phased.vcf.gz $roh_mb_cutoff $roh_threshold "$rohrm_dir" > $rohrm_dir/ROHRM.rohMinSize_$roh_mb_cutoff.rohThreshold_$roh_threshold.log
 python $scripts/analysis_comparison.py $rohrm_dir/ROHRM.rohMinSize_$roh_mb_cutoff.rohThreshold_$roh_threshold $rohrm_dir/filtered.LD_prune.GRM_$group $phenotypes "$rohrm_dir"
-# Global Correlation (Inbreeding): r = 0.0698
+# Global Correlation (Inbreeding): r = 0.0704
 # Global Correlation (Relationships): r = 0.9135
 #Correlations per Subpopulation:
-#  > Trotter: r = 0.0655
-#  > Pacer: r = 0.2697
+#  > Trotter: r = 0.0654
+#  > Pacer: r = 0.2704
 awk -F, 'BEGIN{OFS=FS=","} NR==1{hdr=$0; next} {sum+=$7; n++; lines[n]=$0; vals[n]=$7} \
          END{ mean = (n?sum/n:0); print hdr, "centered_Kinship_diff"; \
               for(i=1;i<=n;i++) printf "%s%s%.8f\n", lines[i], OFS, vals[i]-mean }' $rohrm_dir/Pairwise_Differences.csv > $rohrm_dir/Pairwise_Differences.csv.tmp && mv $rohrm_dir/Pairwise_Differences.csv.tmp $rohrm_dir/Pairwise_Differences.csv
