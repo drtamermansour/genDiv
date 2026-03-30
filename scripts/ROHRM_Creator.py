@@ -230,7 +230,7 @@ class ROHAnalysis:
         self.G_matrix /= len(self.windows)
         print("Matrix construction complete.")
 
-    def save_matrix(self, roh_mb_cutoff, roh_threshold):
+    def save_matrix(self, roh_mb_cutoff, roh_threshold, output_dir):
         filename_prefix=f"{output_dir}/ROHRM.rohMinSize_{roh_mb_cutoff}.rohThreshold_{roh_threshold}"
         print(f"Saving Matrix and IDs to {filename_prefix}...")
 
@@ -251,18 +251,22 @@ class ROHAnalysis:
 # ==========================================
 # FINAL EXECUTION SCRIPT
 # ==========================================
-import sys
+import argparse
 
 if __name__ == "__main__":
-    if len(sys.argv) != 5:
-        print("Usage: python ROHRM_Creator.py <filtered.norm.phased.vcf.gz> <roh_mb_cutoff> <roh_threshold> <output_dir>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description='Compute ROH Relationship Matrix from a phased VCF.')
+    parser.add_argument('vcf', help='Phased VCF file (e.g. filtered.norm.phased.vcf.gz)')
+    parser.add_argument('roh_mb_cutoff', type=float, help='Minimum ROH size in Mb')
+    parser.add_argument('roh_threshold', type=float,
+                        help='SD threshold for window filtering (e.g. 3.0)')
+    parser.add_argument('output_dir', help='Directory to write output files')
+    args = parser.parse_args()
 
-    # Update these paths to your specific files
-    VCF_FILE = sys.argv[1]
-    roh_mb_cutoff = float(sys.argv[2])
-    roh_threshold = float(sys.argv[3])
-    output_dir = sys.argv[4]
+    VCF_FILE = args.vcf
+    roh_mb_cutoff = args.roh_mb_cutoff
+    roh_threshold = args.roh_threshold
+    output_dir = args.output_dir
     
     # 1. Initialize
     # roh_threshold=3 corresponds to "Mean - 3*SD" from the C++ input
@@ -280,7 +284,7 @@ if __name__ == "__main__":
     # 5. Compute Kernel
     if len(analysis.windows) > 0:
         analysis.compute_relationship_matrix()
-        analysis.save_matrix(roh_mb_cutoff, roh_threshold)
+        analysis.save_matrix(roh_mb_cutoff, roh_threshold, output_dir)
     else:
         print("No windows survived filtering. Cannot compute matrix.")
 

@@ -112,9 +112,12 @@ def create_enhanced_roh_scatter_plots(file1_path, file2_path, output_path):
     
     return df_merged
 
-# Usage
 if __name__ == "__main__":
-    if len(sys.argv) == 4:
-        create_enhanced_roh_scatter_plots(sys.argv[1], sys.argv[2], sys.argv[3])
-    else:
-        print("Usage: python enhanced_script.py <Roh_shared_file> <froh_file> <output_file>")
+    import argparse
+    parser = argparse.ArgumentParser(
+        description='Scatter plot of F_ROH vs ROH_shared by gait and book size.')
+    parser.add_argument('roh_shared_file', help='Per-sample consensus ROH intersection file')
+    parser.add_argument('froh_file', help='Per-sample F_ROH file (with gait column)')
+    parser.add_argument('output_file', help='Output PNG file path')
+    args = parser.parse_args()
+    create_enhanced_roh_scatter_plots(args.roh_shared_file, args.froh_file, args.output_file)

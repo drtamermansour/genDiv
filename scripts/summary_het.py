@@ -1,8 +1,8 @@
 import argparse
 import pandas as pd
 import numpy as np
-import os
 import sys
+from utils import format_stats
 
 # ================= CLI SETUP =================
 parser = argparse.ArgumentParser(description="Generate a summary table of heterozygosity and inbreeding coefficient.")
@@ -38,15 +38,6 @@ df.replace([np.inf, -np.inf], np.nan, inplace=True)
 cols_idx = [4, 5, 7]
 target_cols = [df.columns[i] for i in cols_idx]
 factor_col = df.columns[8]  # Column 9
-
-# Helper function to format Mean +/- SD
-def format_stats(group_df, columns):
-    results = {}
-    for col in columns:
-        m = group_df[col].mean()
-        s = group_df[col].std()
-        results[col] = f"{m:.2f} +/- {s:.2f}"
-    return results
 
 # 2. Calculate Whole Population Statistics
 pop_stats = format_stats(df, target_cols)

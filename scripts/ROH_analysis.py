@@ -288,18 +288,21 @@ class ROHAnalysis:
 # ==========================================
 # EXECUTION
 # ==========================================
-import sys
+import argparse
 
 if __name__ == "__main__":
-    if len(sys.argv) != 5:
-        print("Usage: python ROH_analysis.py <filtered.norm.phased.vcf.gz> <phenotypes.txt> <roh_mb_cutoff> <output_dir>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description='Identify ROH islands and genome proportion statistics from a phased VCF.')
+    parser.add_argument('vcf', help='Phased VCF file (e.g. filtered.norm.phased.vcf.gz)')
+    parser.add_argument('phenotypes', help='Phenotype file (headerless TSV: FID IID Phenotype)')
+    parser.add_argument('roh_mb_cutoff', type=float, help='Minimum ROH size in Mb')
+    parser.add_argument('output_dir', help='Directory to write output files')
+    args = parser.parse_args()
 
-    # Settings
-    VCF_FILE = sys.argv[1]
-    PHENO_FILE = sys.argv[2]
-    roh_mb_cutoff = float(sys.argv[3])
-    output_dir= sys.argv[4]
+    VCF_FILE = args.vcf
+    PHENO_FILE = args.phenotypes
+    roh_mb_cutoff = args.roh_mb_cutoff
+    output_dir = args.output_dir
     
     # Run
     # 1. Init

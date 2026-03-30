@@ -1,4 +1,7 @@
-args = commandArgs(TRUE);
+args = commandArgs(trailingOnly = TRUE);
+if (length(args) < 4) stop("Usage: Rscript correlation_plot_multiway_v3.R <diag_file> <kingkin_file> <eucl_file> <out_prefix>", call. = FALSE)
+for (f in args[1:3]) { if (!file.exists(f)) stop(paste("Input file not found:", f), call. = FALSE) }
+
 require(ggplot2);
 require(reshape2);
 require(GGally);

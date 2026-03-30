@@ -124,7 +124,7 @@ class RobustMatrixComparator:
         pd.DataFrame(data).to_csv(output_file, index=False)
         print("Done.")
 
-    def compare_and_plot(self):
+    def compare_and_plot(self, out_dir):
         print(f"\n--- Comparing Matrices ---")
         
         # Scaling
@@ -144,9 +144,9 @@ class RobustMatrixComparator:
         print(f"Global Correlation (Relationships): r = {corr_rel:.4f}")
 
         # Generate Plots
-        self._generate_plots(diag_std, diag_roh, off_diag_std, off_diag_roh, corr_diag, corr_rel)
+        self._generate_plots(diag_std, diag_roh, off_diag_std, off_diag_roh, corr_diag, corr_rel, out_dir)
 
-    def _generate_plots(self, d_std, d_roh, od_std, od_roh, r_diag, r_rel):
+    def _generate_plots(self, d_std, d_roh, od_std, od_roh, r_diag, r_rel, out_dir):
         plt.figure(figsize=(16, 12))
         sns.set_style("whitegrid")
 
@@ -255,7 +255,7 @@ if __name__ == "__main__":
     comp.load_phenotypes(PHENO_FILE) 
     comp.load_and_align()
     
-    comp.compare_and_plot()
+    comp.compare_and_plot(out_dir)
     comp.save_inbreeding_data(output_file=f"{out_dir}/Inbreeding_Comparison.csv")
     comp.save_pairwise_data(output_file=f"{out_dir}/Pairwise_Differences.csv") # Generates the new pair file
 

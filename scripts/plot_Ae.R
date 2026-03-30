@@ -7,6 +7,12 @@ base_path <- "LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filte
 gaits <- c("Trotter", "Pacer")
 book_sizes <- c("LOW", "MEDIUM", "HIGH")
 
+# Verify at least one input file exists before proceeding
+sample_file <- paste0(base_path, ".", gaits[1], "_", book_sizes[1], ".afreq.Ae")
+if (!file.exists(sample_file)) {
+  stop(paste("No input files found. Expected e.g.:", sample_file), call. = FALSE)
+}
+
 # --- ROBUST DATA LOADER (Same as before) ---
 load_data <- function(filename, group_label) {
   if (file.exists(filename)) {
