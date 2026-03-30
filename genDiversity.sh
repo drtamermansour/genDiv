@@ -61,7 +61,7 @@ log "Section 1: Downloading data"
 module load rclone ## Loading rclone/1.65.1
 mkdir -p SNPdata_iScan_Standardbred
 SNPdata="$(pwd)/SNPdata_iScan_Standardbred"
-rclone lsd remote_UCDavis_GoogleDr: --drive-shared-with-me
+#rclone lsd remote_UCDavis_GoogleDr: --drive-shared-with-me
 rclone -v copy "remote_UCDavis_GoogleDr:STR_Imputation_2025/SNP data - iScan_Standardbred" --drive-shared-with-me --include "USTA_Diversit*" $SNPdata/.
 
 ## Download metadata
