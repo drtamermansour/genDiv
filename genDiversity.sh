@@ -87,7 +87,12 @@ mkdir -p preprocess
 ## Confrim that each sire show up in one book size
 tail -n+2 $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv | \
     cut -d"," -f5,7 | sort -t"," -k2,2 | uniq > preprocess/sire_book
-awk 'BEGIN{FS=","}{horses[$2]++}END{for (h in horses) {if(horses[h]>1)print h}}' preprocess/sire_book | grep -Fwf - preprocess/sire_book
+awk 'BEGIN{FS=","}{horses[$2]++}END{ \
+	if(length(horses) < NR) { \
+		print "Oops! We have these duplicate sires in the input BookSize file." > "/dev/stderr"; \
+		for(h in horses) { if(horses[h]>1) print h } \
+	} else { print "Good! No duplicate sires in the in the input BookSize file." > "/dev/stderr";} \
+}' preprocess/sire_book | grep -Fwf - preprocess/sire_book || true
 
 ## Identify full siblings 
 tail -n+2 $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv | \
