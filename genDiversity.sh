@@ -265,8 +265,8 @@ awk -v size=0.02 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($6/size); a[b]++; bmax=b>bm
 0.24    0.26    1
 COMMENT
 
-paste inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2_noPAR.sex.sexcheck inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het | cut -f1,2,4,6,9-12 | less
-paste inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2_noPAR.sex.sexcheck inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het | cut -f1,2,4,6,9-12 | awk -F"\t" '{if($3=="NA")print}' | sort -t $'\t' -k4,4g
+## Look as samples with heck-sex problem
+paste inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2_noPAR.sex.sexcheck inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het | cut -f1,2,4,6,9-12 | awk -F"\t" '{if($3=="NA")print}' | sort -t $'\t' -k4,4g > inspect/problem.sexcheck
 #cat inspect/AxiomGT1v2.explore.het | awk '{if($6>0.3)print}' >  inspect/AxiomGT1v2.explore.het.highHomo ## high homozygosity (i.e. low heterozygosity)
 #cat inspect/AxiomGT1v2.explore.het | awk '{if(NR==1)print}{if($6<-0.3)print}' >  inspect/AxiomGT1v2.explore.het.lowHomo ## low homozygosity
 
@@ -399,6 +399,7 @@ plink2 --vcf $vcf_filtered.norm.phased.vcf.gz --chr-set 31 no-y no-xy no-mt --al
 
 pl1_pruned="LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.norm.phased.LD_prune"
 plink2 --vcf $vcf_filtered.norm.phased.vcf.gz --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+       --psam filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered.psam \
        --extract LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.norm.phased.LD_lst.prune.in \
        --real-ref-alleles --make-bed --output-chr 'chrM' --out $pl1_pruned ## 45576 variants remaining
 
