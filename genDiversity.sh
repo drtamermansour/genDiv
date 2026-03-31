@@ -521,15 +521,15 @@ rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/P
 
 ## Identify Trotter samples segregating on PC2
 ## After exlcusion of highly related animal, this subpopulation is segregating on PC4 (I keep the name of file on_PC2 to avoid confusion ) 
-cat $pca_prefix.eigenvec | awk 'BEGIN{FS=OFS="\t"}{if($6>0.1)print $2}' | grep -Fwf - $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv > divStats/Trotters_segregating_on_PC2.csv
+cat $pca_prefix.eigenvec | awk 'BEGIN{FS=OFS="\t"}{if($6>0.1)print $2}' | grep -Fwf - $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv > divStats/Trotters_segregating_on_PC2.csv || true
 rclone -v copy divStats/Trotters_segregating_on_PC2.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 ## Identify Pacer samples co-segregating with Trotters on PC1
 ## 10 samples; currently labeled as undefined.  
-cat $pca_prefix.eigenvec | awk 'BEGIN{FS=OFS="\t"}{if($3<0)print $2}' | grep -Fwf - $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv | grep "Pacer" > divStats/Pacers_cosegregating_withTrotters_on_PC1.csv
+cat $pca_prefix.eigenvec | awk 'BEGIN{FS=OFS="\t"}{if($3<0)print $2}' | grep -Fwf - $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv | grep "Pacer" > divStats/Pacers_cosegregating_withTrotters_on_PC1.csv || true
 rclone -v copy divStats/Pacers_cosegregating_withTrotters_on_PC1.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 ## Identify Trotter samples co-segregating with Pacers on PC1
 ## 8 samples; currently labeled as undefined.  
-cat $pca_prefix.eigenvec | awk 'BEGIN{FS=OFS="\t"}{if($3>0)print $2}' | grep -Fwf - $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv | grep "Trotter" > divStats/Trotters_cosegregating_withPacers_on_PC1.csv
+cat $pca_prefix.eigenvec | awk 'BEGIN{FS=OFS="\t"}{if($3>0)print $2}' | grep -Fwf - $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv | grep "Trotter" > divStats/Trotters_cosegregating_withPacers_on_PC1.csv || true
 rclone -v copy divStats/Trotters_cosegregating_withPacers_on_PC1.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
 
