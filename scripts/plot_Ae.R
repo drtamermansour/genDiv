@@ -3,7 +3,7 @@ library(dplyr)
 library(tidyr)
 
 # --- CONFIGURATION ---
-base_path <- "LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.LD_prune.freq_stats" 
+base_path <- "LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.norm.phased.LD_prune.freq_stats"
 gaits <- c("Trotter", "Pacer")
 book_sizes <- c("LOW", "MEDIUM", "HIGH")
 
