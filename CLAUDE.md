@@ -113,10 +113,9 @@ Google Drive (rclone)
 
 `genDiversity.sh` creates and uses two top-level directories:
 
-- `input_data/` — `SNPdata_iScan_Standardbred/` (downloaded genotypes) and `Miscellaneous_documents_standardbred/` (downloaded metadata).
-- `results_<timestamp>/` — per-run output directory. `<timestamp>` is `YYYYMMDD_HHMMSS` captured when the script starts. Contains `preprocess/`, `dedup/`, `inspect/`, `filtered/`, `LD_pruned/`, `divStats/`, `rep_ROHRM/`, and the run log (`run.log`). Subdir names after the timestamped prefix are unchanged from the pre-refactor layout.
+- `results_<timestamp>/` — per-run output directory. Contains the downloaded inputs (`SNPdata_iScan_Standardbred/`, `Miscellaneous_documents_standardbred/`) alongside pipeline outputs (`preprocess/`, `dedup/`, `inspect/`, `filtered/`, `LD_pruned/`, `divStats/`, `rep_ROHRM/`) and the run log (`run.log`). `<timestamp>` is `YYYYMMDD_HHMMSS` captured when the script starts; override by exporting `OUTPUT_DIR=<existing_dir>` before invocation to reuse or resume into a prior folder. Subdir names after the timestamped prefix are unchanged from the pre-refactor layout.
 
-`input_data/` and `results_*/` are in `.gitignore`.
+`results_*/` is in `.gitignore`.
 
 Each run writes its full stdout+stderr to `${OUTPUT_DIR}/run.log` via a `tee` + `exec` redirection set near the top of the script.
 
@@ -154,8 +153,7 @@ All tunable values are centralized in the CONFIG block at the top of `genDiversi
   - `CONSENSUS_MIN_MB=0.5`
   - `ROH_THRESHOLD_SD=3.0` (window SNP-count filter)
 - **Directory layout**
-  - `INPUT_DIR="input_data"`
-  - `OUTPUT_DIR="results_$(date +%Y%m%d_%H%M%S)"` — fresh timestamped folder every run
+  - `OUTPUT_DIR="results_$(date +%Y%m%d_%H%M%S)"` — fresh timestamped folder every run; override by exporting `OUTPUT_DIR=<existing_dir>` before invocation to reuse or resume into a prior folder.
 - **Phasing:** BEAGLE (required before `ROHRM_Creator.py`)
 
 ## Running Individual Python Scripts

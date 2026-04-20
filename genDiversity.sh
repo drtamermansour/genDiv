@@ -35,8 +35,7 @@ PRIMARY_ROH_MB=1.0      # Primary ROH window cutoff used in downstream analyses
 ROH_CUTOFFS="1.0 5.0 10.0"   # All ROH window cutoffs to evaluate
 
 # Directory layout (relative to the working directory)
-INPUT_DIR="input_data"                                    # holds downloaded inputs (SNPdata + metadata)
-OUTPUT_DIR="results_$(date +%Y%m%d_%H%M%S)"               # per-run output dir; each invocation creates a fresh timestamped folder
+OUTPUT_DIR="${OUTPUT_DIR:-results_$(date +%Y%m%d_%H%M%S)}" # per-run output dir; override via env var, else fresh timestamped folder
 
 # ============================================================
 # HELPER FUNCTIONS
@@ -70,14 +69,14 @@ log "Pipeline log: ${RUN_LOG}"
 ## Download genotyping data (PLINK: ped and map files)
 log "Section 1: Downloading data"
 module load rclone ## Loading rclone/1.65.1
-mkdir -p "${INPUT_DIR}/SNPdata_iScan_Standardbred"
-SNPdata="$(pwd)/${INPUT_DIR}/SNPdata_iScan_Standardbred"
+mkdir -p "${OUTPUT_DIR}/SNPdata_iScan_Standardbred"
+SNPdata="$(pwd)/${OUTPUT_DIR}/SNPdata_iScan_Standardbred"
 #rclone lsd remote_UCDavis_GoogleDr: --drive-shared-with-me
 rclone -v copy "remote_UCDavis_GoogleDr:STR_Imputation_2025/SNP data - iScan_Standardbred" --drive-shared-with-me --include "USTA_Diversit*" $SNPdata/.
 
 ## Download metadata
-mkdir -p "${INPUT_DIR}/Miscellaneous_documents_standardbred"
-docs="$(pwd)/${INPUT_DIR}/Miscellaneous_documents_standardbred"
+mkdir -p "${OUTPUT_DIR}/Miscellaneous_documents_standardbred"
+docs="$(pwd)/${OUTPUT_DIR}/Miscellaneous_documents_standardbred"
 #rclone -v copy "remote_UCDavis_GoogleDr:STR_Imputation_2025/Miscellaneous documents_standardbred/USTA_Gait_BookSize_Assignments_Sex_Added.xlsx" --drive-shared-with-me $docs/.
 rclone -v copy "remote_UCDavis_GoogleDr:STR_Imputation_2025/updated_resources/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.xlsx" --drive-shared-with-me $docs/.
 rclone -v copy "remote_UCDavis_GoogleDr:STR_Imputation_2025/updated_resources/QC excluded samples/trotters_toExclude.lst" --drive-shared-with-me $docs/.
