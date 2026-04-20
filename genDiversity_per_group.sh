@@ -43,14 +43,10 @@ group="gait"
 kingkin="${OUTPUT_DIR}/divStats/filtered.LD_prune.king_${group}.kin0"
 kingkin_wIBS="${kingkin}.withIBS"
 
-## Group-specific naming helper. Keep wholePop's bare filenames unchanged so
-## downstream consumers don't break; Step 7 will unify on the strict GPA
-## convention (always ".wholePop." inserted) once GPA is ready.
-if [[ "$rg" == "wholePop" ]]; then
-    rg_tag=""
-else
-    rg_tag=".${rg}"
-fi
+## Strict GPA naming: every per-group file has ".${rg}." inserted before
+## its extension, including for wholePop. Consumer update contract in
+## MIGRATION.md.
+rg_tag=".${rg}"
 
 mkdir -p "${OUTPUT_DIR}/divStats" "${OUTPUT_DIR}/LD_pruned"
 
@@ -93,11 +89,7 @@ rclone -v copy "${OUTPUT_DIR}/divStats/Var_PCs${rg_tag}.jpg" "remote_UCDavis_Goo
 # Color by Book Size (all groups)
 awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.bookSize" "$pca_prefix.eigenvec" > "$pca_prefix.eigenvec.wBook_Size"
 eigenvec_suffix="wBook_Size"; color_column="Book_Size"
-if [[ "$rg" == "wholePop" ]]; then
-    out_png="${OUTPUT_DIR}/divStats/pca_plot_BookSize.png"
-else
-    out_png="${OUTPUT_DIR}/divStats/pca_plot_BookSize.${rg}.png"
-fi
+out_png="${OUTPUT_DIR}/divStats/pca_plot_BookSize.${rg}.png"
 Rscript scripts/pca_plots.R "$pca_prefix" "$eigenvec_suffix" "$color_column" "$out_png" "$n_pcs" factor
 rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
@@ -154,11 +146,7 @@ rclone -v copy "${het_rg_prefix}.het" "remote_UCDavis_GoogleDr:STR_Imputation_20
 ##########################################
 awk 'BEGIN{FS=OFS="\t";a["IID"]="COI"}NR==FNR{a[$2]=$8;next}{print $0,a[$2]}' <(tail -n+2 "${het_rg_prefix}.het") "$pca_prefix.eigenvec" > "$pca_prefix.eigenvec.wCOI"
 eigenvec_suffix="wCOI"; color_column="COI"
-if [[ "$rg" == "wholePop" ]]; then
-    out_png="${OUTPUT_DIR}/divStats/pca_plot_inbreeding.png"
-else
-    out_png="${OUTPUT_DIR}/divStats/pca_plot_inbreeding.${rg}.png"
-fi
+out_png="${OUTPUT_DIR}/divStats/pca_plot_inbreeding.${rg}.png"
 Rscript scripts/pca_plots.R "$pca_prefix" "$eigenvec_suffix" "$color_column" "$out_png" "$n_pcs" numeric
 rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
@@ -406,18 +394,10 @@ het_stats_rg="${het_rg_prefix}.het"
 Froh_stats_rg="${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.${rg}.txt"
 conShare_rg="${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt"
 
-## Output naming: wholePop keeps the original bare filenames so the wholePop
-## plots are byte-identical to today's single-plot pipeline; Trotter/Pacer get
-## a .${rg}. suffix inserted.
-if [[ "$rg" == "wholePop" ]]; then
-    froh_prefix="${OUTPUT_DIR}/divStats/coi_Froh_rmDiag_correlation"
-    froh_cons_prefix="${OUTPUT_DIR}/divStats/coi_Froh_rmDiag_conShare_correlation"
-    dbl_tag=""
-else
-    froh_prefix="${OUTPUT_DIR}/divStats/coi_Froh_rmDiag_correlation.${rg}"
-    froh_cons_prefix="${OUTPUT_DIR}/divStats/coi_Froh_rmDiag_conShare_correlation.${rg}"
-    dbl_tag=".${rg}"
-fi
+## Strict GPA naming: wholePop outputs also carry the ".wholePop." marker.
+froh_prefix="${OUTPUT_DIR}/divStats/coi_Froh_rmDiag_correlation.${rg}"
+froh_cons_prefix="${OUTPUT_DIR}/divStats/coi_Froh_rmDiag_conShare_correlation.${rg}"
+dbl_tag=".${rg}"
 
 ## --mode froh: COI vs F_ROH vs D_STD vs D_ROH
 Rscript scripts/correlation_plot.R --mode froh "$RM_diag_rg" "$het_stats_rg" "$Froh_stats_rg" "$froh_prefix"
@@ -440,33 +420,29 @@ awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])prin
     "${OUTPUT_DIR}/divStats/rmdiag_conShare${dbl_tag}" \
     > "${OUTPUT_DIR}/divStats/rmdiag_conShare${dbl_tag}_wBooksize"
 Rscript "$scripts/plot_correlation_withColorsAndShapes.R" "${OUTPUT_DIR}/divStats/rmdiag_conShare${dbl_tag}_wBooksize" ROH_sh D_STD Phenotype Book_Size
-if [[ -n "$dbl_tag" ]]; then
     mv "${OUTPUT_DIR}/divStats/correlation_plot_ROH_sh_vs_D_STD_doubleAnn.png" "${OUTPUT_DIR}/divStats/correlation_plot_ROH_sh_vs_D_STD_doubleAnn${dbl_tag}.png"
-fi
+
 rclone -v copy "${OUTPUT_DIR}/divStats/correlation_plot_ROH_sh_vs_D_STD_doubleAnn${dbl_tag}.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 
 awk 'BEGIN{FS=OFS="\t"}NR==FNR{a[$1]=$5;next}{print $0,a[$1]}' "$Froh_stats_rg" <(cat "$RM_diag_rg" | tr ',' '\t') > "${OUTPUT_DIR}/divStats/rmdiag_Froh${dbl_tag}"
 awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])print $0,a[$1];}' "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.bookSize" "${OUTPUT_DIR}/divStats/rmdiag_Froh${dbl_tag}" > "${OUTPUT_DIR}/divStats/rmdiag_Froh${dbl_tag}_wBooksize"
 Rscript "$scripts/plot_correlation_withColorsAndShapes.R" "${OUTPUT_DIR}/divStats/rmdiag_Froh${dbl_tag}_wBooksize" F_ROH D_ROH Phenotype Book_Size
-if [[ -n "$dbl_tag" ]]; then
     mv "${OUTPUT_DIR}/divStats/correlation_plot_F_ROH_vs_D_ROH_doubleAnn.png" "${OUTPUT_DIR}/divStats/correlation_plot_F_ROH_vs_D_ROH_doubleAnn${dbl_tag}.png"
-fi
+
 rclone -v copy "${OUTPUT_DIR}/divStats/correlation_plot_F_ROH_vs_D_ROH_doubleAnn${dbl_tag}.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 
 awk 'BEGIN{FS=OFS="\t"}NR==1{a[$2]="F_SNP";next}NR==FNR{a[$2]=$8;next}{print $0,a[$1]}' "$het_stats_rg" <(cat "$RM_diag_rg" | tr ',' '\t') > "${OUTPUT_DIR}/divStats/rmdiag_Fsnp${dbl_tag}"
 awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])print $0,a[$1];}' "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.bookSize" "${OUTPUT_DIR}/divStats/rmdiag_Fsnp${dbl_tag}" > "${OUTPUT_DIR}/divStats/rmdiag_Fsnp${dbl_tag}_wBooksize"
 Rscript "$scripts/plot_correlation_withColorsAndShapes.R" "${OUTPUT_DIR}/divStats/rmdiag_Fsnp${dbl_tag}_wBooksize" F_SNP D_ROH Phenotype Book_Size
-if [[ -n "$dbl_tag" ]]; then
     mv "${OUTPUT_DIR}/divStats/correlation_plot_F_SNP_vs_D_ROH_doubleAnn.png" "${OUTPUT_DIR}/divStats/correlation_plot_F_SNP_vs_D_ROH_doubleAnn${dbl_tag}.png"
-fi
+
 rclone -v copy "${OUTPUT_DIR}/divStats/correlation_plot_F_SNP_vs_D_ROH_doubleAnn${dbl_tag}.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 
 awk 'BEGIN{FS=OFS="\t"}NR==1{a[$2]="F_SNP";next}NR==FNR{a[$2]=$8;next}{print $0,a[$1]}' "$het_stats_rg" "${OUTPUT_DIR}/divStats/rmdiag_Froh${dbl_tag}" > "${OUTPUT_DIR}/divStats/rmdiag_Froh_Fsnp${dbl_tag}"
 awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])print $0,a[$1];}' "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.bookSize" "${OUTPUT_DIR}/divStats/rmdiag_Froh_Fsnp${dbl_tag}" > "${OUTPUT_DIR}/divStats/rmdiag_Froh_Fsnp${dbl_tag}_wBooksize"
 Rscript "$scripts/plot_correlation_withColorsAndShapes.R" "${OUTPUT_DIR}/divStats/rmdiag_Froh_Fsnp${dbl_tag}_wBooksize" F_SNP F_ROH Phenotype Book_Size
-if [[ -n "$dbl_tag" ]]; then
     mv "${OUTPUT_DIR}/divStats/correlation_plot_F_SNP_vs_F_ROH_doubleAnn.png" "${OUTPUT_DIR}/divStats/correlation_plot_F_SNP_vs_F_ROH_doubleAnn${dbl_tag}.png"
-fi
+
 rclone -v copy "${OUTPUT_DIR}/divStats/correlation_plot_F_SNP_vs_F_ROH_doubleAnn${dbl_tag}.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 
 ##########################################
@@ -539,14 +515,7 @@ rclone -v copy "$pca_prefix.correlation_plot_PCA_EUCLIDEAN_DIST_vs_KINSHIP_PLINK
 ##########################################
 ## 14. Cross-method correlation plot (ROHRM vs KING vs PCA, per group)
 ##########################################
-## For wholePop we keep the bare-name out_prefix to match today's
-## filtered.LD_prune.pca.relatedness_correlation.* produced by the old
-## inline loop that stripped "wholePop." from the name.
-if [[ "$rg" == "wholePop" ]]; then
-    out_prefix="${OUTPUT_DIR}/divStats/wholePop.relatedness_correlation"
-else
-    out_prefix="${OUTPUT_DIR}/divStats/${rg}.relatedness_correlation"
-fi
+out_prefix="${OUTPUT_DIR}/divStats/${rg}.relatedness_correlation"
 Rscript scripts/correlation_plot.R --mode pairwise \
     "${canonical_dir}/Pairwise_Differences.${rg}.csv" \
     "$kingkin_wIBS" \
