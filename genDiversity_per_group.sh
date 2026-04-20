@@ -36,6 +36,13 @@ docs="$(pwd)/${OUTPUT_DIR}/Miscellaneous_documents_standardbred"
 samples_rg="${OUTPUT_DIR}/preprocess/samples.${rg}.txt"
 aut_len=$(cat "${OUTPUT_DIR}/divStats/effective_autosomal_genome_length.txt")
 
+## Whole-pop KING outputs produced by shared.sh; per_group.sh consumes these
+## for the per-gait related filter (§3.5 below) and for the Euclidean + KING
+## merge + cross-method correlation plot (§10–§11).
+group="gait"
+kingkin="${OUTPUT_DIR}/divStats/filtered.LD_prune.king_${group}.kin0"
+kingkin_wIBS="${kingkin}.withIBS"
+
 ## Group-specific naming helper. Keep wholePop's bare filenames unchanged so
 ## downstream consumers don't break; Step 7 will unify on the strict GPA
 ## convention (always ".wholePop." inserted) once GPA is ready.
@@ -315,3 +322,16 @@ mv "${grp_workdir}/Inbreeding_Comparison.csv" "${canonical_dir}/Inbreeding_Compa
 mv "${grp_workdir}/Pairwise_Differences.csv"  "${canonical_dir}/Pairwise_Differences.${rg}.csv"
 rclone -v copy "${canonical_dir}/Inbreeding_Comparison.${rg}.csv" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
 rclone -v copy "${canonical_dir}/Pairwise_Differences.${rg}.csv"  "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
+
+##########################################
+## 10. Per-gait "related" filter (Trotter / Pacer only)
+##########################################
+## shared.sh's "related" file is the whole-pop list of first-degree pairs
+## (KING kinship > 0.177). Here we keep just the rows where a gait-labeled
+## sample appears. For wholePop the shared.sh file already covers the entire
+## population, so no subsetting needed.
+if [[ "$rg" != "wholePop" ]]; then
+    grep "$rg" "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.${group}" | cut -f2 \
+        | grep -Fwf - "${OUTPUT_DIR}/divStats/related" \
+        > "${OUTPUT_DIR}/divStats/related_${rg}"
+fi

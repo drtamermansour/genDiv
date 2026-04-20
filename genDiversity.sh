@@ -533,39 +533,12 @@ Rscript $scripts/plot_correlation_withColorsAndShapes.R "$input_file" F_SNP F_RO
 rclone -v copy ${OUTPUT_DIR}/divStats/correlation_plot_F_SNP_vs_F_ROH_doubleAnn.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 
 
-## Resume relatedness work ############################################
-############################################
-## KING-robust kinship estimator
-############################################
-plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-    --make-king-table 'counts' 'cols=+ibs1' \
-    --output-chr 'chrM' --out ${OUTPUT_DIR}/divStats/filtered.LD_prune.king_$group
-
-kingkin="${OUTPUT_DIR}/divStats/filtered.LD_prune.king_$group.kin0"
-awk -v size=0.05 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($10/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
-                    END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(tail -n+2 $kingkin) > ${kingkin%.kin0}.histo
-rclone -v copy $kingkin "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
-rclone -v copy ${kingkin%.kin0}.histo "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
-
-## Likely first-degree relations (maybe we neeed to increase this cut-off for such an inbreed population)
-head -n 1 $kingkin > ${OUTPUT_DIR}/divStats/related && tail -n +2 $kingkin | sort -grk10,10 | awk '{if($10>0.177)print}' >> ${OUTPUT_DIR}/divStats/related
-grep "Trotter" ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.$group | cut -f2 | grep -Fwf - ${OUTPUT_DIR}/divStats/related > ${OUTPUT_DIR}/divStats/related_Trotter
-grep "Pacer" ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.$group | cut -f2 | grep -Fwf - ${OUTPUT_DIR}/divStats/related > ${OUTPUT_DIR}/divStats/related_Pacer
-############################################
-## calc IBS
-############################################
-## IBS1= HET1_HOM2 + HET2_HOM1 
-## IBS2= N_SNPs - (HETHET + IBS0 + IBS1)
-## IBS = (2*IBS2 + IBS1) / (2*N_SNPs)
-#awk 'BEGIN{FS=OFS="\t"}NR==1{print $0,"IBS";next}{print $0,(2*$7+$8+$9)/(2*$5)}' $kingkin > ${kingkin}.withIBS
-awk 'BEGIN{FS=OFS="\t"}NR==1{print $0,"IBS";next}{ibs1=$8+$9;ibs2=$5-($6+$7+ibs1);print $0,(2*ibs2+ibs1)/(2*$5)}' $kingkin > ${kingkin}.withIBS
-
-## useless
-## Plot the correlation between KING-robust kinship and IBS
-Rscript $scripts/plot_correlation.R ${kingkin}.withIBS KINSHIP IBS
-rclone -v copy ${OUTPUT_DIR}/divStats/correlation_plot_KINSHIP_vs_IBS.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
-#Plot saved as: correlation_plot_KINSHIP_vs_IBS.png 
-#Correlation (Pearson): 0.392 
+## KING whole-pop computation + IBS + KINSHIP-vs-IBS plot moved to shared.sh.
+## Per-gait related_${rg} filter moved to per_group.sh (runs after
+## analysis_comparison). The remaining PCA Euclidean / KING merge /
+## correlation plot blocks below will move to per_group.sh next commit.
+kingkin="${OUTPUT_DIR}/divStats/filtered.LD_prune.king_${group}.kin0"
+kingkin_wIBS="${kingkin}.withIBS"
 
 ############################################
 ## PCA-based pairwise Euclidean distance

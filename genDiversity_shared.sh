@@ -526,6 +526,32 @@ echo $aut_len > ${OUTPUT_DIR}/divStats/effective_autosomal_genome_length.txt
 awk '$1 ~ /^[0-9]+$/' "$reference_fai" | awk 'BEGIN{OFS="\t"}{print "chr"$1,$2}' > "${OUTPUT_DIR}/divStats/autosomes.genome"
 
 ##########################################
+## Whole-pop KING-robust kinship + IBS (consumed by per_group.sh Euclidean + correlation plots)
+##########################################
+group="gait"
+plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+    --make-king-table 'counts' 'cols=+ibs1' \
+    --output-chr 'chrM' --out "${OUTPUT_DIR}/divStats/filtered.LD_prune.king_$group"
+
+kingkin="${OUTPUT_DIR}/divStats/filtered.LD_prune.king_$group.kin0"
+awk -v size=0.05 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($10/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
+                    END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }' <(tail -n+2 $kingkin) > ${kingkin%.kin0}.histo
+rclone -v copy "$kingkin" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+rclone -v copy "${kingkin%.kin0}.histo" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+
+## Likely first-degree relations (whole-pop filter; per-gait filters in per_group.sh)
+head -n 1 "$kingkin" > "${OUTPUT_DIR}/divStats/related"
+tail -n +2 "$kingkin" | sort -grk10,10 | awk '{if($10>0.177)print}' >> "${OUTPUT_DIR}/divStats/related"
+
+## IBS augmentation of kin0: IBS1 = HET1_HOM2 + HET2_HOM1; IBS2 = N_SNPs - (HETHET + IBS0 + IBS1);
+## IBS = (2*IBS2 + IBS1) / (2*N_SNPs).
+awk 'BEGIN{FS=OFS="\t"}NR==1{print $0,"IBS";next}{ibs1=$8+$9;ibs2=$5-($6+$7+ibs1);print $0,(2*ibs2+ibs1)/(2*$5)}' "$kingkin" > "${kingkin}.withIBS"
+
+## Whole-pop KING kinship vs IBS correlation plot (one-shot)
+Rscript "$scripts/plot_correlation.R" "${kingkin}.withIBS" KINSHIP IBS
+rclone -v copy "${OUTPUT_DIR}/divStats/correlation_plot_KINSHIP_vs_IBS.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+
+##########################################
 ## Whole-pop heterozygosity (F_SNP seed consumed by per_group.sh COI overlay)
 ##########################################
 ## Produces filtered.LD_prune.het_stats.het — a whole-pop .het file that
