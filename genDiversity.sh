@@ -31,25 +31,6 @@ log "Section 5: Diversity statistics"
 mkdir -p ${OUTPUT_DIR}/divStats
 
 
-##########################################
-## 2. Fst between subpopulations (genders, gait types, and book sizes)
-##########################################
-## The fixation index can range from 0 to 1, where 0 means complete sharing of genetic material and 1 means no sharing. 
-## For values equal to 1(meaning no sharing), scientists say that the populations are fixed.
-## Effects of marker type and filtering criteria on QST-FST comparisons: https://pmc.ncbi.nlm.nih.gov/articles/PMC6894560/
-for group in sex gait bookSize; do
-    plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-        --pheno ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.$group \
-        --fst 'PHENO1' 'blocksize=2000' \
-        --output-chr 'chrM' --out ${OUTPUT_DIR}/divStats/filtered.LD_prune.fst_$group
-done
-
-find ${OUTPUT_DIR}/divStats/filtered.LD_prune.fst_*.summary -maxdepth 1 -type f | grep -v "\.x\." | xargs cat > ${OUTPUT_DIR}/divStats/autosomal.fst.summary
-rclone -v copy ${OUTPUT_DIR}/divStats/autosomal.fst.summary "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
-
-
-Rscript scripts/fst_stats.R "${OUTPUT_DIR}" &> ${OUTPUT_DIR}/divStats/fst_stats.txt
-rclone -v copy ${OUTPUT_DIR}/divStats/fst_stats.txt "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
 
 ##########################################
 ## 3. Expected and observed heterozygosity and inbreeding coefficient

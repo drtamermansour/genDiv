@@ -647,3 +647,31 @@ Rscript scripts/plot_Ae.R "${OUTPUT_DIR}"
 rclone -v copy ${OUTPUT_DIR}/divStats/effAllele_stats.txt "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Ae/" --drive-shared-with-me
 rclone -v copy ${OUTPUT_DIR}/divStats/Figure_Ae_BookSize.tiff "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Ae/" --drive-shared-with-me
 #rclone -v copy ${OUTPUT_DIR}/divStats/Figure_Ae_BookSize.pdf "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Ae/" --drive-shared-with-me
+
+
+##########################################
+## FST between subpopulations (whole-pop differentiation metric)
+##########################################
+## `for group in sex gait bookSize; do plink2 --fst ...; done` computes
+## autosomal FST for three groupings, then cats the per-grouping summaries
+## into autosomal.fst.summary and feeds fst_stats.R for the adjusted-pairwise
+## table. This is a one-shot whole-pop analysis — no per-group parameterisation.
+##########################################
+## 2. Fst between subpopulations (genders, gait types, and book sizes)
+##########################################
+## The fixation index can range from 0 to 1, where 0 means complete sharing of genetic material and 1 means no sharing. 
+## For values equal to 1(meaning no sharing), scientists say that the populations are fixed.
+## Effects of marker type and filtering criteria on QST-FST comparisons: https://pmc.ncbi.nlm.nih.gov/articles/PMC6894560/
+for group in sex gait bookSize; do
+    plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+        --pheno ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.$group \
+        --fst 'PHENO1' 'blocksize=2000' \
+        --output-chr 'chrM' --out ${OUTPUT_DIR}/divStats/filtered.LD_prune.fst_$group
+done
+
+find ${OUTPUT_DIR}/divStats/filtered.LD_prune.fst_*.summary -maxdepth 1 -type f | grep -v "\.x\." | xargs cat > ${OUTPUT_DIR}/divStats/autosomal.fst.summary
+rclone -v copy ${OUTPUT_DIR}/divStats/autosomal.fst.summary "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
+
+
+Rscript scripts/fst_stats.R "${OUTPUT_DIR}" &> ${OUTPUT_DIR}/divStats/fst_stats.txt
+rclone -v copy ${OUTPUT_DIR}/divStats/fst_stats.txt "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
