@@ -432,6 +432,36 @@ bcftools norm -c ws -f $ref $vcf_pruned.test.gz 1> $vcf_pruned.test.check.vcf 2>
 
 
 ##########################################
+## Per-group sample lists (consumed by genDiversity_per_group.sh)
+##########################################
+## samples.${rg}.txt — 2-column FID\tIID files suitable for plink2 --keep or
+## bcftools view -S (via `cut -f2` for a 1-column IID list when needed).
+## wholePop = all samples in the post-QC LD-pruned fam (the authoritative set).
+## Trotter / Pacer = intersection of the fam with gait labels. Samples without
+## a gait label appear only in wholePop.
+awk 'BEGIN{OFS="\t"}{print $1,$2}' "${pl1_pruned}.fam" > "${OUTPUT_DIR}/preprocess/samples.wholePop.txt"
+for rg in Trotter Pacer; do
+    awk -v rg="$rg" 'BEGIN{OFS="\t"} NR==FNR{fam[$2]=$1;next} fam[$2] && $3==rg {print fam[$2],$2}' \
+        "${pl1_pruned}.fam" "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait" \
+        > "${OUTPUT_DIR}/preprocess/samples.${rg}.txt"
+done
+
+## sample_groups.tsv — canonical IID→primary-group map for the reference set.
+## One row per sample; wholePop membership is implicit (everyone is in wholePop).
+## group ∈ {Trotter, Pacer, wholePop}. Samples with no gait label get group=wholePop.
+{
+    echo "# sample_groups.tsv — primary group per reference sample."
+    echo "# One row per sample; wholePop membership is implicit."
+    echo "# group ∈ {Trotter, Pacer, wholePop}. Samples with no gait label get group=wholePop."
+    printf "IID\tgroup\n"
+    awk 'BEGIN{FS=OFS="\t"} NR==FNR{gait[$2]=$3;next} {g=gait[$2]; if(g==""||g=="undefined") g="wholePop"; print $2,g}' \
+        "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait" "${pl1_pruned}.fam"
+} > "${OUTPUT_DIR}/preprocess/sample_groups.tsv"
+
+log "Per-group sample lists: wholePop=$(wc -l < "${OUTPUT_DIR}/preprocess/samples.wholePop.txt") Trotter=$(wc -l < "${OUTPUT_DIR}/preprocess/samples.Trotter.txt") Pacer=$(wc -l < "${OUTPUT_DIR}/preprocess/samples.Pacer.txt")"
+
+
+##########################################
 ## Whole-pop ROH calling, L1/L2/L3 filters, per-sample summaries
 ##########################################
 ##########################################
