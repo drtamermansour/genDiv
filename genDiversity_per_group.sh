@@ -187,3 +187,44 @@ awk 'BEGIN{print "IID\tNSEG\tKB\tKBAVG"} $1=="RG"{n[$2]++; sum[$2]+=$6} END{for 
 awk -v aut_len="$aut_len" 'BEGIN{FS=OFS="\t";}NR==1{print $0,"F_ROH";next} {print $0, ($3*1000)/aut_len}' \
     "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.${rg}.txt" > "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.${rg}.txt"
 rclone -v copy "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.${rg}.txt" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/" --drive-shared-with-me
+
+##########################################
+## GPA per-group reference files 4+5: GRM + ROHRM → D_SNP, G_SNP, D_ROH, G_ROH
+##########################################
+## Per-group standard GRM (vanRaden) via plink2 --make-rel + per-group ROHRM
+## (Howard re-implementation). analysis_comparison.py writes
+## Inbreeding_Comparison.csv (IID, D_STD, D_ROH, Phenotype) and
+## Pairwise_Differences.csv (ID1, ID2, Pheno1, Pheno2, Kinship_Std, Kinship_ROH,
+## Difference) — schemas matching today's whole-pop outputs that GPA consumes.
+## Working dir is per-group; the final CSVs are copied to the canonical
+## rep_ROHRM/roh_1Mb.Threshold_3SD/ location with the .${rg}. suffix GPA expects.
+grp_workdir="${OUTPUT_DIR}/rep_ROHRM/perGroup_${rg}"
+mkdir -p "$grp_workdir" "${OUTPUT_DIR}/rep_ROHRM/roh_1Mb.Threshold_3SD"
+
+# Per-group GRM
+grm_prefix="${grp_workdir}/filtered.LD_prune.GRM.${rg}"
+plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+    --keep "$samples_rg" \
+    --make-rel 'square' \
+    --read-freq "$pruned_afreq" \
+    --output-chr 'chrM' --out "$grm_prefix"
+
+# Per-group ROHRM (primary cutoff only per GPA proposal)
+rohrm_mb="$PRIMARY_ROH_MB"
+rohrm_sd="$ROH_THRESHOLD_SD"
+rohrm_prefix="${grp_workdir}/ROHRM.rohMinSize_${rohrm_mb}.rohThreshold_${rohrm_sd}"
+run_python "$scripts/ROHRM_Creator.py" "$group_vcf" "$rohrm_mb" "$rohrm_sd" "$grp_workdir" \
+    > "${rohrm_prefix}.log"
+
+# Compare matrices and emit Inbreeding_Comparison.csv + Pairwise_Differences.csv
+run_python "$scripts/analysis_comparison.py" \
+    "$rohrm_prefix" \
+    "$grm_prefix" \
+    "$phenotypes" "$grp_workdir"
+
+# Promote to canonical location with .${rg}. suffix (matches GPA proposal §112)
+canonical_dir="${OUTPUT_DIR}/rep_ROHRM/roh_1Mb.Threshold_3SD"
+mv "${grp_workdir}/Inbreeding_Comparison.csv" "${canonical_dir}/Inbreeding_Comparison.${rg}.csv"
+mv "${grp_workdir}/Pairwise_Differences.csv"  "${canonical_dir}/Pairwise_Differences.${rg}.csv"
+rclone -v copy "${canonical_dir}/Inbreeding_Comparison.${rg}.csv" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
+rclone -v copy "${canonical_dir}/Pairwise_Differences.${rg}.csv"  "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
