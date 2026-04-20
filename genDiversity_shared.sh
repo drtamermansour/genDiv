@@ -461,55 +461,6 @@ done
 log "Per-group sample lists: wholePop=$(wc -l < "${OUTPUT_DIR}/preprocess/samples.wholePop.txt") Trotter=$(wc -l < "${OUTPUT_DIR}/preprocess/samples.Trotter.txt") Pacer=$(wc -l < "${OUTPUT_DIR}/preprocess/samples.Pacer.txt")"
 
 
-##########################################
-## Whole-pop ROH calling, L1/L2/L3 filters, per-sample summaries
-##########################################
-##########################################
-# 4E. ROH using bcftools/roh (Filtered dataset without LD pruning) -- This is the final approved approach
-##########################################
-## Run bcftools roh
-bcftools roh -G30 --estimate-AF - $vcf_filtered.norm.phased.vcf.gz -o ${OUTPUT_DIR}/divStats/roh_out.txt
-##Number of target samples: 560
-##Number of --estimate-AF samples: 560
-##Number of sites in the buffer/overlap: unlimited
-##Number of lines total/processed: 57829/57829 (old: 58106/58106)
-##Number of lines ${OUTPUT_DIR}/filtered/no AF/no alt/multiallelic/dup: 0/0/0/0/0
-
-grep -E "^RG|^#" ${OUTPUT_DIR}/divStats/roh_out.txt > ${OUTPUT_DIR}/divStats/roh_out_RG.txt
-## Summary stats by RG
-awk 'BEGIN{print "IID\tNSEG\tKB\tKBAVG"} $1=="RG"{n[$2]++; sum[$2]+=$6} END{for (s in n) printf "%s\t%d\t%.2f\t%.2f\n", s, n[s], sum[s]/1000, (sum[s]/1000)/n[s]}' ${OUTPUT_DIR}/divStats/roh_out_RG.txt > ${OUTPUT_DIR}/divStats/roh_summary_by_RG.txt
-awk 'NR > 1{ sum2 += $2; sum3 += $3; sum4 += $4 } END \
-    { count = NR - 1; printf "Average Number of runs of homozygosity (NSEG) : %.2f\n \
-    Average of the total length of runs (kb) across all samples: %.2f\n \
-    Average of the average length of runs (KBAVG) across all samples: %.2f\n", \
-    sum2/count, sum3/count, sum4/count }' ${OUTPUT_DIR}/divStats/roh_summary_by_RG.txt
-##Average Number of runs of homozygosity (NSEG) : 86.53
-##Average of the total length of runs (kb) across all samples: 456,016.51
-##Average of the average length of runs (KBAVG) across all samples: 5,256.67
-
-## filtration to match the PLINK quality suggestions 
-#Minimum ROH length (--homozyg-kb) 1000 kb
-awk '/^#/ || $6 >= 1000000' ${OUTPUT_DIR}/divStats/roh_out_RG.txt > ${OUTPUT_DIR}/divStats/roh.L1.txt
-#Minimum number of SNPs in ROH (--homozyg-snp) 50
-awk '/^#/ || $7 >= 50' ${OUTPUT_DIR}/divStats/roh.L1.txt > ${OUTPUT_DIR}/divStats/roh.L2.txt
-#Quality scores
-awk -v size=2 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($8/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(grep -v "^#" ${OUTPUT_DIR}/divStats/roh.L2.txt) > ${OUTPUT_DIR}/divStats/roh.L2.histo 
-awk '/^#/ || $8 >= 20' ${OUTPUT_DIR}/divStats/roh.L2.txt > ${OUTPUT_DIR}/divStats/roh.L3.txt
-
-## Summary stats by RG after QC filtration && Stratify the file by the gait type
-## The stats will be recalculated again later with Froh using "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.txt"
-awk 'BEGIN{print "IID\tNSEG\tKB\tKBAVG"} $1=="RG"{n[$2]++; sum[$2]+=$6} END{for (s in n) printf "%s\t%d\t%.2f\t%.2f\n", s, n[s], sum[s]/1000, (sum[s]/1000)/n[s]}' ${OUTPUT_DIR}/divStats/roh.L3.txt > ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.txt
-awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {if(gait[$1])print $0,gait[$1];else print $0,"undefined";}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.txt > ${OUTPUT_DIR}/divStats/roh.L3_gait.txt
-INPUT_ROH="${OUTPUT_DIR}/divStats/roh.L3_gait.txt"
-OUTPUT_FILE="${OUTPUT_DIR}/divStats/roh.L3_gait.sumStats.csv"
-python scripts/summary_roh.py -i "$INPUT_ROH" -o "$OUTPUT_FILE"
-rclone -v copy ${OUTPUT_DIR}/divStats/roh.L3_gait.sumStats.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
-#Subgroup,          N,      NSEG,           KB,                         KBAVG
-#Whole Population,  560,    54.58 +/- 9.43, 413086.61 +/- 103171.97,    7533.22 +/- 1210.63
-#Pacer,             271,    50.34 +/- 7.11, 379860.14 +/- 81886.48,     7535.88 +/- 1224.94
-#Trotter,           271,    59.28 +/- 9.02, 451519.43 +/- 105452.45,    7580.75 +/- 1166.36
-#undefined,         18,     47.67 +/- 11.92,334702.03 +/- 138748.03,    6777.52 +/- 1454.36
-
 
 ##########################################
 ## Effective autosomal genome length + autosomes.genome
@@ -550,19 +501,6 @@ awk 'BEGIN{FS=OFS="\t"}NR==1{print $0,"IBS";next}{ibs1=$8+$9;ibs2=$5-($6+$7+ibs1
 ## Whole-pop KING kinship vs IBS correlation plot (one-shot)
 Rscript "$scripts/plot_correlation.R" "${kingkin}.withIBS" KINSHIP IBS
 rclone -v copy "${OUTPUT_DIR}/divStats/correlation_plot_KINSHIP_vs_IBS.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
-
-##########################################
-## Whole-pop heterozygosity (F_SNP seed consumed by per_group.sh COI overlay)
-##########################################
-## Produces filtered.LD_prune.het_stats.het — a whole-pop .het file that
-## genDiversity_per_group.sh uses to color PCA plots by COI. Step 5d will add
-## per-group .het files (filtered.LD_prune.${rg}.het_stats.het) computed with
-## --read-freq pruned.${rg}.afreq; this whole-pop file is the wholePop fallback.
-plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-    --het 'cols=fid,hom,het,nobs,f' \
-    --out ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats
-awk -v size=0.02 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($8/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
-                END { for(i=bmin;i<=bmax;++i){if(i==0) print -1*size,size,a[i]/1;else if(i<0) print (i-1)*size,i*size,a[i]/1;else print i*size,(i+1)*size,a[i]/1 }}'  <(tail -n+2 ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het) > ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.histo
 
 ##########################################
 ## A_e — Effective number of alleles (whole-pop diversity metric)

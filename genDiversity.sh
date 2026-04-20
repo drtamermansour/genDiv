@@ -40,7 +40,7 @@ mkdir -p ${OUTPUT_DIR}/divStats
 
 ## generate a summary table of heterozygosity and inbreeding coefficient in the two subpopulations and the whole cohort
 awk 'BEGIN{FS=OFS="\t";a["IID"]="Gait"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' \
-     ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het > ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait
+     ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.wholePop.het > ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait
 
 INPUT_HET="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait"
 OUTPUT_FILE="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait.sumStats.csv"
@@ -48,13 +48,13 @@ python scripts/summary_het.py -i "$INPUT_HET" -o "$OUTPUT_FILE"
 
 ## generate a summary table of heterozygosity and inbreeding coefficient in the three book size in the two subpopulations and the whole cohort
 awk 'BEGIN{FS=OFS="\t";a["IID"]="Gait"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' \
-     ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het > ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait_bookSize
+     ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.wholePop.het > ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait_bookSize
 
 INPUT_HET="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait_bookSize"
 OUTPUT_FILE="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait_bookSize.sumStats.csv"
 python scripts/summary_het.py -i "$INPUT_HET" -o "$OUTPUT_FILE"
 
-rclone -v copy ${OUTPUT_DIR}/divStats --include "filtered.LD_prune.het_stats.het*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/het_and_COI/" --drive-shared-with-me
+rclone -v copy ${OUTPUT_DIR}/divStats --include "filtered.LD_prune.het_stats.wholePop.het*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/het_and_COI/" --drive-shared-with-me
 
 
 
@@ -107,7 +107,7 @@ awk 'NR > 1{ sum4 += $4; sum5 += $5; sum6 += $6 } END \
 
 ## Rscript that plots the correlation between "KB" and "KBAVG" from .hom.indiv and the difference O(HET) and E(HET), and F columns from .het
 roh_indiv="${OUTPUT_DIR}/divStats/filtered.LD_prune.roh_$group.hom.indiv" ## to read KB and KBAVG
-het_stats="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het"        ## to read O(HET), E(HET), and F
+het_stats="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.wholePop.het"        ## to read O(HET), E(HET), and F
 out_prefix="${OUTPUT_DIR}/divStats/filtered.LD_prune.roh_$group.hom"
 Rscript scripts/correlation_plot.R --mode basic $roh_indiv $het_stats $out_prefix
 rclone -v copy $out_prefix.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/plink_pruned/" --drive-shared-with-me
@@ -132,7 +132,7 @@ awk 'NR > 1{ sum4 += $4; sum5 += $5; sum6 += $6 } END \
 
 ## Rscript that plots the correlation between  KB and KBAVG from .hom.indiv and the difference O(HET) and E(HET), and F columns from .het
 roh_indiv="${OUTPUT_DIR}/divStats/filtered.not_pruned.roh_$group.hom.indiv" ## to read KB and KBAVG
-het_stats="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het"        ## to read O(HET), E(HET), and F
+het_stats="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.wholePop.het"        ## to read O(HET), E(HET), and F
 out_prefix="${OUTPUT_DIR}/divStats/filtered.not_pruned.roh_$group.hom"
 Rscript scripts/correlation_plot.R --mode basic $roh_indiv $het_stats $out_prefix
 rclone -v copy $out_prefix.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/plink_${OUTPUT_DIR}/filtered/" --drive-shared-with-me
@@ -157,7 +157,7 @@ awk 'NR > 1{ sum4 += $4; sum5 += $5; sum6 += $6 } END \
 
 ## Rscript that plots the correlation between  KB and KBAVG from .hom.indiv and the difference O(HET) and E(HET), and F columns from .het
 roh_indiv="${OUTPUT_DIR}/divStats/filtered.not_pruned.group_roh_$group.hom.indiv" ## to read KB and KBAVG
-het_stats="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het"        ## to read O(HET), E(HET), and F
+het_stats="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.wholePop.het"        ## to read O(HET), E(HET), and F
 out_prefix="${OUTPUT_DIR}/divStats/filtered.not_pruned.group_roh_$group.hom"
 Rscript scripts/correlation_plot.R --mode basic $roh_indiv $het_stats $out_prefix
 rclone -v copy $out_prefix.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/plink_filtered_gp/" --drive-shared-with-me
@@ -229,25 +229,18 @@ rclone -v copy $rohrm_dir/Filtered_ROH_Subpop_Stats.csv "remote_UCDavis_GoogleDr
 
 ## Rscript that plots the correlation between KB and KBAVG from .hom.indiv and the difference O(HET) and E(HET), and F columns from .het
 ## Similar analysis will be done later after calculation of related matrices
-roh_indiv="${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.txt" ## to read KB and KBAVG
-het_stats="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het"        ## to read O(HET), E(HET), and F
+roh_indiv="${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.wholePop.txt" ## to read KB and KBAVG
+het_stats="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.wholePop.het"        ## to read O(HET), E(HET), and F
 out_prefix="${OUTPUT_DIR}/divStats/filtered.not_pruned.roh_summary_by_RG_L3"
 Rscript scripts/correlation_plot.R --mode basic $roh_indiv $het_stats $out_prefix
 rclone -v copy $out_prefix.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
 
 
-############################################
-## 5. F_ROH statistic (currently calculated based on bacftools roh)
-############################################
-## F_ROH is an inbreeding coefficient based on runs of homozygosity
-## Standard practice is to calculate F_{ROH} statistics on all valid ROHs (>1Mb), while restricting "Islands" (signatures of selection) to only the most robust regions.
-## per-sample F_ROH = (sum length of ROH for that individual) / (total autosomal genome length).
+## F_ROH statistic: whole-pop F_ROH summary is produced by per_group.sh wholePop
+## (roh_summary_by_RG_L3_Froh.wholePop.txt). Histograms, roh_high.csv, and
+## gait/book-size stratified summaries + Froh-vs-ROHsh plots live in
+## genDiversity_aggregate.sh.
 
-
-awk -v aut_len=$aut_len 'BEGIN{FS=OFS="\t";}NR==1{print $0,"F_ROH";next} {print $0, ($3*1000)/aut_len}' ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.txt > ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.txt
-
-## Froh-vs-ROHsh plots moved to genDiversity_aggregate.sh; they consume the
-## twoGait / threeBooksize concatenations produced there.
 
 ############################################
 ## x. Nucleotide diversity statistic (pi) -- This section is under development

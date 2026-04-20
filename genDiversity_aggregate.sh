@@ -40,25 +40,25 @@ done >> "${roh_RG}.perSample_intersect_threeBooksize_consensus_${pct}pct.summary
 ##########################################
 ## F_ROH histograms + high-F_ROH shortlist + gait-joined summaries
 ##########################################
-## Inputs: whole-pop roh_summary_by_RG_L3_Froh.txt produced inline in
+## Inputs: whole-pop roh_summary_by_RG_L3_Froh.wholePop.txt produced inline in
 ## genDiversity.sh's Section-5 block (before aggregate.sh fires).
 ## Outputs:
 ##   roh_summary_by_RG_L3_Froh.histo       — F_ROH histogram across all samples
 ##   roh_high.csv                          — samples with F_ROH > 0.3
 ##   roh.L3_Froh_gait.txt / .sumStats.csv  — gait-stratified F_ROH summary
 ##   roh.L3_Froh_gait_bookSize.txt / .sumStats.csv — book-size × gait stratified
-awk -v size=0.02 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($5/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(tail -n+2 ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.txt) > ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.histo
+awk -v size=0.02 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($5/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(tail -n+2 ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.wholePop.txt) > ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.histo
 rclone -v copy ${OUTPUT_DIR}/divStats  --drive-shared-with-me --include "roh_summary_by_RG_L3_Froh.*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/"
 
-awk '{if($5>0.3)print $0}' ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.txt | tr '\t' ',' > ${OUTPUT_DIR}/divStats/roh_high.csv
+awk '{if($5>0.3)print $0}' ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.wholePop.txt | tr '\t' ',' > ${OUTPUT_DIR}/divStats/roh_high.csv
 rclone -v copy ${OUTPUT_DIR}/divStats/roh_high.csv  --drive-shared-with-me "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/"
 
-awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {if(gait[$1])print $0,gait[$1];else print $0,"undefined";}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.txt > ${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.txt
+awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {if(gait[$1])print $0,gait[$1];else print $0,"undefined";}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.wholePop.txt > ${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.txt
 INPUT_ROH="${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.txt"
 OUTPUT_FILE="${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.sumStats.csv"
 python scripts/summary_roh.py -i "$INPUT_ROH" -o "$OUTPUT_FILE" -n 4
 
-awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {if(gait[$1])print $0,gait[$1];else print $0,"undefined";}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.txt > ${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.txt
+awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {if(gait[$1])print $0,gait[$1];else print $0,"undefined";}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.wholePop.txt > ${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.txt
 INPUT_ROH="${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.txt"
 OUTPUT_FILE="${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.sumStats.csv"
 python scripts/summary_roh.py -i "$INPUT_ROH" -o "$OUTPUT_FILE" -n 4
