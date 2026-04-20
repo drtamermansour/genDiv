@@ -154,3 +154,36 @@ plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
     --read-freq "$pruned_afreq" \
     --output-chr 'chrM' --out "$het_rg_prefix"
 rclone -v copy "${het_rg_prefix}.het" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/het_and_COI/" --drive-shared-with-me
+
+##########################################
+## GPA per-group reference file 3: F_ROH summary (bcftools roh with group AF)
+##########################################
+## For wholePop we consume the whole-pop phased VCF directly; for Trotter /
+## Pacer we create a group-subset phased VCF (also used by ROHRM in 5d-iii).
+## bcftools roh --estimate-AF - computes AF from the VCF's own samples, so
+## the group-subset VCF produces group-specific AF without a separate AF file.
+if [[ "$rg" == "wholePop" ]]; then
+    group_vcf="${vcf_filtered}.norm.phased.vcf.gz"
+else
+    group_vcf="${OUTPUT_DIR}/filtered/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.norm.phased.${rg}.vcf.gz"
+    bcftools view -S <(cut -f2 "$samples_rg") --force-samples \
+        "${vcf_filtered}.norm.phased.vcf.gz" -Oz -o "$group_vcf"
+    bcftools index -t "$group_vcf"
+fi
+
+## Run bcftools roh + the L1/L2/L3 filter chain from shared.sh, but with
+## group-specific AF because we passed a group-subset VCF (or the whole-pop
+## one for wholePop). Outputs carry the .${rg}. suffix to avoid colliding
+## with shared.sh's whole-pop artifacts.
+bcftools roh -G30 --estimate-AF - "$group_vcf" -o "${OUTPUT_DIR}/divStats/roh_out.${rg}.txt"
+grep -E "^# RG|^RG" "${OUTPUT_DIR}/divStats/roh_out.${rg}.txt" > "${OUTPUT_DIR}/divStats/roh_out_RG.${rg}.txt"
+awk '/^#/ || $6 >= 1000000' "${OUTPUT_DIR}/divStats/roh_out_RG.${rg}.txt" > "${OUTPUT_DIR}/divStats/roh.L1.${rg}.txt"
+awk '/^#/ || $7 >= 50'      "${OUTPUT_DIR}/divStats/roh.L1.${rg}.txt"    > "${OUTPUT_DIR}/divStats/roh.L2.${rg}.txt"
+awk '/^#/ || $8 >= 20'      "${OUTPUT_DIR}/divStats/roh.L2.${rg}.txt"    > "${OUTPUT_DIR}/divStats/roh.L3.${rg}.txt"
+## Per-sample counts
+awk 'BEGIN{print "IID\tNSEG\tKB\tKBAVG"} $1=="RG"{n[$2]++; sum[$2]+=$6} END{for (s in n) printf "%s\t%d\t%.2f\t%.2f\n", s, n[s], sum[s]/1000, (sum[s]/1000)/n[s]}' \
+    "${OUTPUT_DIR}/divStats/roh.L3.${rg}.txt" > "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.${rg}.txt"
+## Append F_ROH column using the shared effective autosomal genome length
+awk -v aut_len="$aut_len" 'BEGIN{FS=OFS="\t";}NR==1{print $0,"F_ROH";next} {print $0, ($3*1000)/aut_len}' \
+    "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.${rg}.txt" > "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.${rg}.txt"
+rclone -v copy "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.${rg}.txt" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/" --drive-shared-with-me
