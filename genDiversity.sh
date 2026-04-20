@@ -5,7 +5,7 @@ set -eo pipefail
 # CONFIG — edit these values to adapt the pipeline
 # ============================================================
 # Paths (relative to the parent directory of this repo)
-equCab3_map="$(pwd)/../Equine80select_remapper/results/matchingSNPs_binary_consistantMapping.equCab3_map"
+equCab3_map="$(pwd)/../Equine80select_remapper/results_E80selv2_to_equCab3noAlt_genDiv/qc/Equine80select_v2_1_HTS_20143333_B1_UCD_allele_map_equCab3noAlt.tsv"
 ref="../Horse_parentage_SNPs/equCab3/download/equCab3.fa"
 reference_fai="$HOME/Equine80select_remapper/equCab3/equCab3_genome.fa.fai"
 GDRIVE_BASE="remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs"
@@ -139,7 +139,7 @@ log "Section 2: Remapping to EquCab3"
 ## In either case, their is a ref_allele to use in PLINK2
 ## check if the SNP alleles in BIM match those in the equCab3_map file
 cat preprocess/USTA_Diversity_Study.bim | awk 'BEGIN{FS=OFS="\t"}{if($5 && $6){a[1]=$5;a[2]=$6;asort(a);print $2,a[1]","a[2]}}' > preprocess/tmpX_alleles_in_BIM.txt ## e.g., "UKUL1_ilmndup1  A,G"
-cat $equCab3_map | awk 'BEGIN{FS=OFS="\t"}{split($4, a, ",");asort(a);split($5, b, ",");asort(b);print $3,a[1]","a[2],b[1]","b[2]}' > preprocess/tmpX_alleles_in_MAP.txt ## e.g., "21962991_Curly_f_ilmndup1       A,G     A,G"
+tail -n+2 $equCab3_map | awk 'BEGIN{FS=OFS="\t"}{split($4, a, ",");asort(a);split($5, b, ",");asort(b);print $3,a[1]","a[2],b[1]","b[2]}' > preprocess/tmpX_alleles_in_MAP.txt ## e.g., "21962991_Curly_f_ilmndup1       A,G     A,G"
 awk 'BEGIN{FS=OFS="\t"}FNR==NR{a[$1]=$2;next}{if(a[$1])print $1,a[$1],$2,$3;}' \
     preprocess/tmpX_alleles_in_BIM.txt preprocess/tmpX_alleles_in_MAP.txt > preprocess/tmpX_compare_BIM_MAP.txt ## SNP_ID \t BIM_alleles \t MAP_SNP_alleles \t MAP_genomic_alleles
 awk 'BEGIN{FS=OFS="\t"}{if($2!=$3)a+=1;if($2!=$4)b+=1;}END{print "mismatching SNP alleles:",a," mismatching genomic alleles:",b;}' preprocess/tmpX_compare_BIM_MAP.txt
@@ -152,18 +152,18 @@ cat $equCab3_map | grep ^Un_NW | cut -f3 > preprocess/unplaced_snps.txt
 ## 1. select the variants to keep  
 ## 2. update chr/positions based on the equCab3_map
 ## 3. update -ve strand SNP alleles to postive strand version
-cut -f3 $equCab3_map | grep -v -f <(cat preprocess/ambiguous_snps.txt preprocess/unplaced_snps.txt) > preprocess/snps_to_remap.txt ## 79314
-awk 'BEGIN{FS=OFS="\t"}{print $5}' $equCab3_map | tr 'TCGA' 'AGCT' > preprocess/temp_pos_strand_complement.txt ## complementary genomic_alleles
-paste $equCab3_map preprocess/temp_pos_strand_complement.txt | awk 'BEGIN{FS=OFS="\t"}{print $3,$9,$5}' | tr ',' '\t' > preprocess/pos_strand_alleles.txt ## SNP_ID \t complementary_genomic_alleles \t genomic_alleles
+tail -n+2 $equCab3_map | cut -f3 | grep -v -f <(cat preprocess/ambiguous_snps.txt preprocess/unplaced_snps.txt) > preprocess/snps_to_remap.txt ## 79314
+tail -n+2 $equCab3_map | awk 'BEGIN{FS=OFS="\t"}{print $5}' | tr 'TCGA' 'AGCT' > preprocess/temp_pos_strand_complement.txt ## complementary genomic_alleles
+paste <(tail -n+2 $equCab3_map) preprocess/temp_pos_strand_complement.txt | awk 'BEGIN{FS=OFS="\t"}{print $3,$9,$5}' | tr ',' '\t' > preprocess/pos_strand_alleles.txt ## SNP_ID \t complementary_genomic_alleles \t genomic_alleles
 plink --bfile preprocess/USTA_Diversity_Study --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
     --extract preprocess/snps_to_remap.txt \
-    --update-chr $equCab3_map 1 3 \
-    --update-map $equCab3_map 2 3 \
+    --update-chr $equCab3_map 1 3 1 \
+    --update-map $equCab3_map 2 3 1 \
     --update-alleles preprocess/pos_strand_alleles.txt \
     --make-bed --output-chr 'M' --out preprocess/USTA_Diversity_Study.remap ## input BIM has 79,259 ==> 76,841 remaining
 
 ## 4. update genomic alleles to fill in missing alleles (useless but just to be complete and make sure no snps will show up as mismtach in the next step)
-cat $equCab3_map | awk 'BEGIN{FS=OFS="\t"}{print $3,$5,$5}' | tr ',' '\t' > preprocess/genomic_alleles.txt ## SNP_ID \t genomic_alleles \t genomic_alleles
+tail -n+2 $equCab3_map | awk 'BEGIN{FS=OFS="\t"}{print $3,$5,$5}' | tr ',' '\t' > preprocess/genomic_alleles.txt ## SNP_ID \t genomic_alleles \t genomic_alleles
 plink --bfile preprocess/USTA_Diversity_Study.remap --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
     --update-alleles preprocess/genomic_alleles.txt \
     --make-bed --output-chr 'M' --out preprocess/USTA_Diversity_Study.remap
@@ -225,7 +225,7 @@ plink --bfile preprocess/USTA_Diversity_Study.remap --chr-set 31 no-y no-xy no-m
 
 ## Convert PLINK.1 files to PLINK.2 binary format
 plink2 --bfile preprocess/USTA_Diversity_Study.remap.dedup --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-        --ref-allele 'force' $equCab3_map 7 3 --real-ref-alleles \
+        --ref-allele 'force' $equCab3_map 7 3 1 --real-ref-alleles \
         --make-pgen --sort-vars \
         --output-chr 'chrM' --out preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2
 
