@@ -103,3 +103,31 @@ fi
 ##        cross-method correlation plots
 ##   5d — NEW GPA-proposal metrics: per-group afreq, het, F_ROH, GRM, ROHRM,
 ##        analysis_comparison
+
+##########################################
+## FST of book-size subgroups within this gait (Trotter / Pacer only)
+##########################################
+if [[ "$rg" != "wholePop" ]]; then
+    plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+        --keep "$samples_rg" \
+        --pheno "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.bookSize" \
+        --fst 'PHENO1' 'blocksize=2000' \
+        --output-chr 'chrM' --out "${OUTPUT_DIR}/divStats/filtered.LD_prune.fst_bookSize.${rg}"
+    rclone -v copy "${OUTPUT_DIR}/divStats/filtered.LD_prune.fst_bookSize.${rg}.fst.summary" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
+fi
+
+##########################################
+## PCA: Color samples by COI (whole-pop het file from shared.sh)
+##########################################
+# Step 5d will switch each rg to its own --read-freq-derived .het; for now all
+# three groups overlay COI from the whole-pop filtered.LD_prune.het_stats.het.
+het_stats_whole="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het"
+awk 'BEGIN{FS=OFS="\t";a["IID"]="COI"}NR==FNR{a[$2]=$8;next}{print $0,a[$2]}' <(tail -n+2 "$het_stats_whole") "$pca_prefix.eigenvec" > "$pca_prefix.eigenvec.wCOI"
+eigenvec_suffix="wCOI"; color_column="COI"
+if [[ "$rg" == "wholePop" ]]; then
+    out_png="${OUTPUT_DIR}/divStats/pca_plot_inbreeding.png"
+else
+    out_png="${OUTPUT_DIR}/divStats/pca_plot_inbreeding.${rg}.png"
+fi
+Rscript scripts/pca_plots.R "$pca_prefix" "$eigenvec_suffix" "$color_column" "$out_png" "$n_pcs" numeric
+rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me

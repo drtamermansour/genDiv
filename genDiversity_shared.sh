@@ -631,3 +631,16 @@ aut_len=$(sort -k1,1 -k2,2n "$pl1_filtered".snp_pos.txt | \
               if(gap > 0) {if (gap > 1000000) gap = 1000000; total += gap; }}\
               prev_chr=$1; prev_pos=$2} END {print total}') ## 2,261,547,402
 echo $aut_len > ${OUTPUT_DIR}/divStats/effective_autosomal_genome_length.txt
+
+##########################################
+## Whole-pop heterozygosity (F_SNP seed consumed by per_group.sh COI overlay)
+##########################################
+## Produces filtered.LD_prune.het_stats.het — a whole-pop .het file that
+## genDiversity_per_group.sh uses to color PCA plots by COI. Step 5d will add
+## per-group .het files (filtered.LD_prune.${rg}.het_stats.het) computed with
+## --read-freq pruned.${rg}.afreq; this whole-pop file is the wholePop fallback.
+plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+    --het 'cols=fid,hom,het,nobs,f' \
+    --out ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats
+awk -v size=0.02 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($8/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
+                END { for(i=bmin;i<=bmax;++i){if(i==0) print -1*size,size,a[i]/1;else if(i<0) print (i-1)*size,i*size,a[i]/1;else print i*size,(i+1)*size,a[i]/1 }}'  <(tail -n+2 ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het) > ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.histo

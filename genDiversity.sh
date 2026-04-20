@@ -122,20 +122,6 @@ done
 find ${OUTPUT_DIR}/divStats/filtered.LD_prune.fst_*.summary -maxdepth 1 -type f | grep -v "\.x\." | xargs cat > ${OUTPUT_DIR}/divStats/autosomal.fst.summary
 rclone -v copy ${OUTPUT_DIR}/divStats/autosomal.fst.summary "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
 
-group="bookSize"
-plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-    --keep <(grep "Trotter" ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait) \
-    --pheno ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.$group \
-    --fst 'PHENO1' 'blocksize=2000' \
-    --output-chr 'chrM' --out ${OUTPUT_DIR}/divStats/filtered.LD_prune.fst_$group.Trotter
-rclone -v copy ${OUTPUT_DIR}/divStats/filtered.LD_prune.fst_bookSize.Trotter.fst.summary "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
-
-plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-    --keep <(grep "Pacer" ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait) \
-    --pheno ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.$group \
-    --fst 'PHENO1' 'blocksize=2000' \
-    --output-chr 'chrM' --out ${OUTPUT_DIR}/divStats/filtered.LD_prune.fst_$group.Pacer
-rclone -v copy ${OUTPUT_DIR}/divStats/filtered.LD_prune.fst_bookSize.Pacer.fst.summary "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
 
 Rscript scripts/fst_stats.R "${OUTPUT_DIR}" &> ${OUTPUT_DIR}/divStats/fst_stats.txt
 rclone -v copy ${OUTPUT_DIR}/divStats/fst_stats.txt "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
@@ -145,11 +131,6 @@ rclone -v copy ${OUTPUT_DIR}/divStats/fst_stats.txt "remote_UCDavis_GoogleDr:STR
 ##########################################
 ## An inbreeding coefficient (COI) is a measure of the probability that an individual will have two copies of an allele that are identical by descent from a common ancestor.
 ## A higher COI means more predictability of traits but also a greater risk of genetic health problems due to inbreeding depression
-plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-    --het 'cols=fid,hom,het,nobs,f' \
-    --out ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats
-awk -v size=0.02 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($8/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
-                END { for(i=bmin;i<=bmax;++i){if(i==0) print -1*size,size,a[i]/1;else if(i<0) print (i-1)*size,i*size,a[i]/1;else print i*size,(i+1)*size,a[i]/1 }}'  <(tail -n+2 ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het) > ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.histo
 
 ## generate a summary table of heterozygosity and inbreeding coefficient in the two subpopulations and the whole cohort
 awk 'BEGIN{FS=OFS="\t";a["IID"]="Gait"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' \
@@ -169,27 +150,6 @@ python scripts/summary_het.py -i "$INPUT_HET" -o "$OUTPUT_FILE"
 
 rclone -v copy ${OUTPUT_DIR}/divStats --include "filtered.LD_prune.het_stats.het*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/het_and_COI/" --drive-shared-with-me
 
-## PCA: Color samples on the PCA plots by COI
-# Whole population
-pca_prefix="${OUTPUT_DIR}/divStats/filtered.LD_prune.pca"
-awk 'BEGIN{FS=OFS="\t";a["IID"]="COI"}NR==FNR{a[$2]=$8;next}{print $0,a[$2]}' <(tail -n+2 ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het) $pca_prefix.eigenvec > $pca_prefix.eigenvec.wCOI
-eigenvec_suffix="wCOI"; color_column="COI"; out_png="${OUTPUT_DIR}/divStats/pca_plot_inbreeding.png";
-Rscript scripts/pca_plots.R "$pca_prefix" "$eigenvec_suffix" "$color_column" "$out_png" 6 numeric
-rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
-
-# Trotters only
-pca_prefix_trot="${OUTPUT_DIR}/divStats/filtered.LD_prune.Trotter.pca"
-awk 'BEGIN{FS=OFS="\t";a["IID"]="COI"}NR==FNR{a[$2]=$8;next}{print $0,a[$2]}' <(tail -n+2 ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het) $pca_prefix_trot.eigenvec > $pca_prefix_trot.eigenvec.wCOI
-eigenvec_suffix="wCOI"; color_column="COI"; out_png="${OUTPUT_DIR}/divStats/pca_plot_inbreeding.Trotter.png";
-Rscript scripts/pca_plots.R "$pca_prefix_trot" "$eigenvec_suffix" "$color_column" "$out_png" 3 numeric
-rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
-
-# Pacers only
-pca_prefix_pace="${OUTPUT_DIR}/divStats/filtered.LD_prune.Pacer.pca"
-awk 'BEGIN{FS=OFS="\t";a["IID"]="COI"}NR==FNR{a[$2]=$8;next}{print $0,a[$2]}' <(tail -n+2 ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het) $pca_prefix_pace.eigenvec > $pca_prefix_pace.eigenvec.wCOI
-eigenvec_suffix="wCOI"; color_column="COI"; out_png="${OUTPUT_DIR}/divStats/pca_plot_inbreeding.Pacer.png";
-Rscript scripts/pca_plots.R "$pca_prefix_pace" "$eigenvec_suffix" "$color_column" "$out_png" 3 numeric
-rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
 
 ##########################################
