@@ -359,26 +359,8 @@ OUTPUT_FILE="${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.sumStats.csv"
 python scripts/summary_roh.py -i "$INPUT_ROH" -o "$OUTPUT_FILE" -n 4
 # Summary saved to ${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.sumStats.csv
 
-## Froh vs ROHshared 
-roh_RG="${OUTPUT_DIR}/divStats/roh.L3"
-froh="${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.txt"
-for gp in "wholePop" "twoGait" "threeBooksize";do 
-    conShare=${roh_RG}.perSample_intersect_${gp}_consensus_${pct}pct.summary.txt  ## the concensus length and % per sample (file for each "rg"), calculated in ROH section 
-    output_file="${OUTPUT_DIR}/divStats/Froh_vs_ROHsh_${gp}.png"
-    python scripts/roh_plot.py "$conShare" "$froh" "$output_file"
-    rclone -v copy "$output_file" --drive-shared-with-me "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/"
-    output_prefix="${OUTPUT_DIR}/divStats/normalized_ROHsh_${gp}"
-    run_python scripts/roh_histograms.py --metric ratio "$conShare" "$froh" "$output_prefix"
-    upload "$output_prefix".histogram.png "Froh/"
-    upload "$output_prefix".density.png "Froh/"
-    output_prefix2="${OUTPUT_DIR}/divStats/ROHshared_${gp}"
-    run_python scripts/roh_histograms.py --metric shared "$conShare" "$froh" "$output_prefix2"
-    upload "$output_prefix2".histogram.png "Froh/"
-done &> ${OUTPUT_DIR}/divStats/roh_sh.log
-## Outputs: (tested in "wholePop" "twoGait" "threeBooksize" BUT the best informative is "twoGait")
-## ${OUTPUT_DIR}/divStats/Froh_vs_ROHsh_${gp}.png
-## ${OUTPUT_DIR}/divStats/normalized_ROHsh_${gp}
-## ${OUTPUT_DIR}/divStats/ROHshared_${gp}
+## Froh-vs-ROHsh plots moved to genDiversity_aggregate.sh; they consume the
+## twoGait / threeBooksize concatenations produced there.
 
 ############################################
 ## x. Nucleotide diversity statistic (pi) -- This section is under development
