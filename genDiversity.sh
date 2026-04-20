@@ -19,6 +19,13 @@ pl1_pruned="${OUTPUT_DIR}/LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.
 vcf_pruned="${OUTPUT_DIR}/LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.norm.phased.LD_prune.vcf"
 aut_len=$(cat "${OUTPUT_DIR}/divStats/effective_autosomal_genome_length.txt")
 
+## Per-group stage. Each invocation produces reference files for one group.
+## Currently a stub; subsequent commits move code here from the Section 5/6
+## blocks below.
+for rg in wholePop Trotter Pacer; do
+    bash "$(dirname "$0")/genDiversity_per_group.sh" "$rg"
+done
+
 ############## Stats on diversity ##################
 log "Section 5: Diversity statistics"
 mkdir -p ${OUTPUT_DIR}/divStats
