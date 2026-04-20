@@ -337,6 +337,82 @@ if [[ "$rg" != "wholePop" ]]; then
 fi
 
 ##########################################
+## 15. F_SNP / F_ROH / D_STD / D_ROH / ROH_sh correlation plots
+##########################################
+## Per-group equivalents of the whole-pop correlation_plot.R modes from the
+## original monolithic pipeline. Each plot compares this group's own F_SNP
+## (.het), F_ROH, D_STD/D_ROH (ROHRM vs GRM Inbreeding_Comparison), and
+## ROH_sh (consensus intersect) — so the Trotter tab shows Trotter-only
+## distributions, Pacer tab shows Pacer-only, and wholePop matches today.
+RM_diag_rg="${canonical_dir}/Inbreeding_Comparison.${rg}.csv"
+het_stats_rg="${het_rg_prefix}.het"
+Froh_stats_rg="${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.${rg}.txt"
+conShare_rg="${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt"
+
+## Output naming: wholePop keeps the original bare filenames so the wholePop
+## plots are byte-identical to today's single-plot pipeline; Trotter/Pacer get
+## a .${rg}. suffix inserted.
+if [[ "$rg" == "wholePop" ]]; then
+    froh_prefix="${OUTPUT_DIR}/divStats/coi_Froh_rmDiag_correlation"
+    froh_cons_prefix="${OUTPUT_DIR}/divStats/coi_Froh_rmDiag_conShare_correlation"
+    dbl_tag=""
+else
+    froh_prefix="${OUTPUT_DIR}/divStats/coi_Froh_rmDiag_correlation.${rg}"
+    froh_cons_prefix="${OUTPUT_DIR}/divStats/coi_Froh_rmDiag_conShare_correlation.${rg}"
+    dbl_tag=".${rg}"
+fi
+
+## --mode froh: COI vs F_ROH vs D_STD vs D_ROH
+Rscript scripts/correlation_plot.R --mode froh "$RM_diag_rg" "$het_stats_rg" "$Froh_stats_rg" "$froh_prefix"
+rclone -v copy "${froh_prefix}.pairplot.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+
+## --mode froh-cons: adds ROH_sh via conShare
+Rscript scripts/correlation_plot.R --mode froh-cons "$RM_diag_rg" "$het_stats_rg" "$Froh_stats_rg" "$conShare_rg" "$froh_cons_prefix"
+rclone -v copy "${froh_cons_prefix}.pairplot.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+
+## Focused doubleAnn plots: ROH_sh vs D_STD, F_ROH vs D_ROH, F_SNP vs D_ROH, F_SNP vs F_ROH.
+## plot_correlation_withColorsAndShapes.R hard-codes its output filename to
+## correlation_plot_<x>_vs_<y>_doubleAnn.png, so we rename after each call for
+## Trotter / Pacer.
+awk 'BEGIN{FS=OFS="\t"}NR==FNR{a[$1]=$3;next}{print $0,a[$1]}' \
+    <(cat "$conShare_rg" | sed 's/Percent_of_Consensus_ROH/ROH_sh/') \
+    <(cat "$RM_diag_rg" | tr ',' '\t') \
+    > "${OUTPUT_DIR}/divStats/rmdiag_conShare${dbl_tag}"
+awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])print $0,a[$1];}' \
+    "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.bookSize" \
+    "${OUTPUT_DIR}/divStats/rmdiag_conShare${dbl_tag}" \
+    > "${OUTPUT_DIR}/divStats/rmdiag_conShare${dbl_tag}_wBooksize"
+Rscript "$scripts/plot_correlation_withColorsAndShapes.R" "${OUTPUT_DIR}/divStats/rmdiag_conShare${dbl_tag}_wBooksize" ROH_sh D_STD Phenotype Book_Size
+if [[ -n "$dbl_tag" ]]; then
+    mv "${OUTPUT_DIR}/divStats/correlation_plot_ROH_sh_vs_D_STD_doubleAnn.png" "${OUTPUT_DIR}/divStats/correlation_plot_ROH_sh_vs_D_STD_doubleAnn${dbl_tag}.png"
+fi
+rclone -v copy "${OUTPUT_DIR}/divStats/correlation_plot_ROH_sh_vs_D_STD_doubleAnn${dbl_tag}.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+
+awk 'BEGIN{FS=OFS="\t"}NR==FNR{a[$1]=$5;next}{print $0,a[$1]}' "$Froh_stats_rg" <(cat "$RM_diag_rg" | tr ',' '\t') > "${OUTPUT_DIR}/divStats/rmdiag_Froh${dbl_tag}"
+awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])print $0,a[$1];}' "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.bookSize" "${OUTPUT_DIR}/divStats/rmdiag_Froh${dbl_tag}" > "${OUTPUT_DIR}/divStats/rmdiag_Froh${dbl_tag}_wBooksize"
+Rscript "$scripts/plot_correlation_withColorsAndShapes.R" "${OUTPUT_DIR}/divStats/rmdiag_Froh${dbl_tag}_wBooksize" F_ROH D_ROH Phenotype Book_Size
+if [[ -n "$dbl_tag" ]]; then
+    mv "${OUTPUT_DIR}/divStats/correlation_plot_F_ROH_vs_D_ROH_doubleAnn.png" "${OUTPUT_DIR}/divStats/correlation_plot_F_ROH_vs_D_ROH_doubleAnn${dbl_tag}.png"
+fi
+rclone -v copy "${OUTPUT_DIR}/divStats/correlation_plot_F_ROH_vs_D_ROH_doubleAnn${dbl_tag}.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+
+awk 'BEGIN{FS=OFS="\t"}NR==1{a[$2]="F_SNP";next}NR==FNR{a[$2]=$8;next}{print $0,a[$1]}' "$het_stats_rg" <(cat "$RM_diag_rg" | tr ',' '\t') > "${OUTPUT_DIR}/divStats/rmdiag_Fsnp${dbl_tag}"
+awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])print $0,a[$1];}' "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.bookSize" "${OUTPUT_DIR}/divStats/rmdiag_Fsnp${dbl_tag}" > "${OUTPUT_DIR}/divStats/rmdiag_Fsnp${dbl_tag}_wBooksize"
+Rscript "$scripts/plot_correlation_withColorsAndShapes.R" "${OUTPUT_DIR}/divStats/rmdiag_Fsnp${dbl_tag}_wBooksize" F_SNP D_ROH Phenotype Book_Size
+if [[ -n "$dbl_tag" ]]; then
+    mv "${OUTPUT_DIR}/divStats/correlation_plot_F_SNP_vs_D_ROH_doubleAnn.png" "${OUTPUT_DIR}/divStats/correlation_plot_F_SNP_vs_D_ROH_doubleAnn${dbl_tag}.png"
+fi
+rclone -v copy "${OUTPUT_DIR}/divStats/correlation_plot_F_SNP_vs_D_ROH_doubleAnn${dbl_tag}.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+
+awk 'BEGIN{FS=OFS="\t"}NR==1{a[$2]="F_SNP";next}NR==FNR{a[$2]=$8;next}{print $0,a[$1]}' "$het_stats_rg" "${OUTPUT_DIR}/divStats/rmdiag_Froh${dbl_tag}" > "${OUTPUT_DIR}/divStats/rmdiag_Froh_Fsnp${dbl_tag}"
+awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])print $0,a[$1];}' "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.bookSize" "${OUTPUT_DIR}/divStats/rmdiag_Froh_Fsnp${dbl_tag}" > "${OUTPUT_DIR}/divStats/rmdiag_Froh_Fsnp${dbl_tag}_wBooksize"
+Rscript "$scripts/plot_correlation_withColorsAndShapes.R" "${OUTPUT_DIR}/divStats/rmdiag_Froh_Fsnp${dbl_tag}_wBooksize" F_SNP F_ROH Phenotype Book_Size
+if [[ -n "$dbl_tag" ]]; then
+    mv "${OUTPUT_DIR}/divStats/correlation_plot_F_SNP_vs_F_ROH_doubleAnn.png" "${OUTPUT_DIR}/divStats/correlation_plot_F_SNP_vs_F_ROH_doubleAnn${dbl_tag}.png"
+fi
+rclone -v copy "${OUTPUT_DIR}/divStats/correlation_plot_F_SNP_vs_F_ROH_doubleAnn${dbl_tag}.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+
+##########################################
 ## 11. PCA-based pairwise Euclidean distance
 ##########################################
 awk '
