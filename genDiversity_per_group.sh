@@ -297,8 +297,9 @@ rclone -v copy "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.${rg}.txt" "rem
 ## Difference). Column schemas match the current whole-pop outputs so GPA's
 ## fixed-column-index reads keep working.
 grp_workdir="${OUTPUT_DIR}/rep_ROHRM/perGroup_${rg}"
-mkdir -p "$grp_workdir" "${OUTPUT_DIR}/rep_ROHRM/roh_1Mb.Threshold_3SD"
+mkdir -p "$grp_workdir"
 
+## 9a. Per-group standard GRM (computed once, reused across all ROHRM cutoffs)
 grm_prefix="${grp_workdir}/filtered.LD_prune.GRM.${rg}"
 plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
     --keep "$samples_rg" \
@@ -306,22 +307,78 @@ plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
     --read-freq "$pruned_afreq" \
     --output-chr 'chrM' --out "$grm_prefix"
 
-rohrm_mb="$PRIMARY_ROH_MB"
+## 9b. Per-group ROHRM + analysis_comparison at every cutoff in $ROH_CUTOFFS
+##     ($ROH_CUTOFFS lives in CONFIG so it's already user-tunable there.)
+## Per-cutoff outputs land at rep_ROHRM/roh_${cutoff%.*}Mb.Threshold_${sd}SD/ with
+## a .${rg}. suffix, matching the whole-pop subfolder scheme used previously.
+## canonical_dir below is the primary-cutoff subfolder, used later in §14
+## (cross-method correlation) and §15 (froh-cons correlation plots) — which
+## consume only the primary cutoff's Pairwise_Differences / Inbreeding_Comparison.
 rohrm_sd="$ROH_THRESHOLD_SD"
-rohrm_prefix="${grp_workdir}/ROHRM.rohMinSize_${rohrm_mb}.rohThreshold_${rohrm_sd}"
-run_python "$scripts/ROHRM_Creator.py" "$group_vcf" "$rohrm_mb" "$rohrm_sd" "$grp_workdir" \
-    > "${rohrm_prefix}.log"
+roh_sd_label="${rohrm_sd%.*}SD"
+canonical_dir="${OUTPUT_DIR}/rep_ROHRM/roh_${PRIMARY_ROH_MB%.*}Mb.Threshold_${roh_sd_label}"
 
-run_python "$scripts/analysis_comparison.py" \
-    "$rohrm_prefix" \
-    "$grm_prefix" \
-    "$phenotypes" "$grp_workdir"
+for rohrm_mb in $ROH_CUTOFFS; do
+    subfolder="${OUTPUT_DIR}/rep_ROHRM/roh_${rohrm_mb%.*}Mb.Threshold_${roh_sd_label}"
+    mkdir -p "$subfolder"
+    log "Running ROHRM (rg=${rg}): ${rohrm_mb} Mb cutoff, threshold ${roh_sd_label}"
 
-canonical_dir="${OUTPUT_DIR}/rep_ROHRM/roh_1Mb.Threshold_3SD"
-mv "${grp_workdir}/Inbreeding_Comparison.csv" "${canonical_dir}/Inbreeding_Comparison.${rg}.csv"
-mv "${grp_workdir}/Pairwise_Differences.csv"  "${canonical_dir}/Pairwise_Differences.${rg}.csv"
-rclone -v copy "${canonical_dir}/Inbreeding_Comparison.${rg}.csv" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
-rclone -v copy "${canonical_dir}/Pairwise_Differences.${rg}.csv"  "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
+    rohrm_prefix="${grp_workdir}/ROHRM.rohMinSize_${rohrm_mb}.rohThreshold_${rohrm_sd}"
+    run_python "$scripts/ROHRM_Creator.py" "$group_vcf" "$rohrm_mb" "$rohrm_sd" "$grp_workdir" \
+        > "${rohrm_prefix}.log"
+
+    run_python "$scripts/analysis_comparison.py" \
+        "$rohrm_prefix" \
+        "$grm_prefix" \
+        "$phenotypes" "$grp_workdir"
+
+    # Center the Difference column (col 7) on its mean, append as centered_Kinship_diff
+    awk -F, 'BEGIN{OFS=FS=","} NR==1{hdr=$0; next} {sum+=$7; n++; lines[n]=$0; vals[n]=$7} \
+             END{ mean = (n?sum/n:0); print hdr, "centered_Kinship_diff"; \
+                  for(i=1;i<=n;i++) printf "%s%s%.8f\n", lines[i], OFS, vals[i]-mean }' \
+        "${grp_workdir}/Pairwise_Differences.csv" > "${grp_workdir}/Pairwise_Differences.csv.tmp" \
+        && mv "${grp_workdir}/Pairwise_Differences.csv.tmp" "${grp_workdir}/Pairwise_Differences.csv"
+
+    # Kinship distribution histograms
+    awk -v size=0.05 'BEGIN{FS=",";OFS="\t";bmin=bmax=0}{ b=int($5/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
+                          END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }' \
+        <(tail -n+2 "${grp_workdir}/Pairwise_Differences.csv") > "${grp_workdir}/Pairwise_Differences.Kinship_Std.histo"
+    awk -v size=0.05 'BEGIN{FS=",";OFS="\t";bmin=bmax=0}{ b=int($6/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
+                          END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }' \
+        <(tail -n+2 "${grp_workdir}/Pairwise_Differences.csv") > "${grp_workdir}/Pairwise_Differences.Kinship_ROH.histo"
+    awk -v size=0.01 'BEGIN{FS=",";OFS="\t";bmin=bmax=0}{ b=int($8/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
+                          END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }' \
+        <(tail -n+2 "${grp_workdir}/Pairwise_Differences.csv") > "${grp_workdir}/Pairwise_Differences.Kinship_diff.histo"
+
+    # Primary cutoff only: per-group high-positive / high-negative kinship pair shortlists + gait-mix averages
+    if [[ "$rohrm_mb" == "$PRIMARY_ROH_MB" ]]; then
+        awk 'BEGIN{FS=","} NR==1{print;next}{if($8>0.1) print}' \
+            "${grp_workdir}/Pairwise_Differences.csv" > "${OUTPUT_DIR}/divStats/high_positive_kinship_diff.${rg}.csv"
+        awk 'BEGIN{FS=","} NR==1{print;next}{if($8<-0.15) print}' \
+            "${grp_workdir}/Pairwise_Differences.csv" > "${OUTPUT_DIR}/divStats/high_negative_kinship_diff.${rg}.csv"
+        awk 'BEGIN{FS=","} /Trotter/ && /Pacer/ {sum+=$8; n++} END{if(n)print "Ave diff Trotter-Pacer:", sum/n}' "${grp_workdir}/Pairwise_Differences.csv"
+        awk 'BEGIN{FS=","} /Trotter/ && !/Pacer/ {sum+=$8; n++} END{if(n)print "Ave diff Trotter-Trotter:", sum/n}' "${grp_workdir}/Pairwise_Differences.csv"
+        awk 'BEGIN{FS=","} !/Trotter/ && /Pacer/ {sum+=$8; n++} END{if(n)print "Ave diff Pacer-Pacer:", sum/n}' "${grp_workdir}/Pairwise_Differences.csv"
+    fi
+
+    # Upload per-cutoff outputs under Relatedness/<subfolder-tail>/
+    subfolder_tail="$(basename "$subfolder")"
+    upload "${grp_workdir}/Robust_Matrix_Comparison_Enhanced.png" "Relatedness/${subfolder_tail}/"
+
+    # Move csvs to the per-cutoff canonical dir with .${rg}. suffix; rename
+    # remaining artifacts (matrix comparison png + histos) to carry .${rg}.
+    mv "${grp_workdir}/Inbreeding_Comparison.csv" "${subfolder}/Inbreeding_Comparison.${rg}.csv"
+    mv "${grp_workdir}/Pairwise_Differences.csv"  "${subfolder}/Pairwise_Differences.${rg}.csv"
+    mv "${grp_workdir}/Pairwise_Differences.Kinship_Std.histo"  "${subfolder}/Pairwise_Differences.Kinship_Std.${rg}.histo"
+    mv "${grp_workdir}/Pairwise_Differences.Kinship_ROH.histo"  "${subfolder}/Pairwise_Differences.Kinship_ROH.${rg}.histo"
+    mv "${grp_workdir}/Pairwise_Differences.Kinship_diff.histo" "${subfolder}/Pairwise_Differences.Kinship_diff.${rg}.histo"
+    if [[ -f "${grp_workdir}/Robust_Matrix_Comparison_Enhanced.png" ]]; then
+        mv "${grp_workdir}/Robust_Matrix_Comparison_Enhanced.png" "${subfolder}/Robust_Matrix_Comparison_Enhanced.${rg}.png"
+    fi
+
+    rclone -v copy "${subfolder}/Inbreeding_Comparison.${rg}.csv" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
+    rclone -v copy "${subfolder}/Pairwise_Differences.${rg}.csv"  "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
+done
 
 ##########################################
 ## 10. Per-gait "related" filter (Trotter / Pacer only)

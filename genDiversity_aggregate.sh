@@ -91,7 +91,7 @@ done &> "${OUTPUT_DIR}/divStats/roh_sh.log"
 ## keep pairs where the ROHRM Kinship_Std column exceeds 0.1 — a quick "these
 ## look genuinely related by both methods" shortlist.
 group="gait"
-cat "${OUTPUT_DIR}/rep_ROHRM/roh_1Mb.Threshold_3SD/Pairwise_Differences.csv" \
+cat "${OUTPUT_DIR}/rep_ROHRM/roh_1Mb.Threshold_3SD/Pairwise_Differences.wholePop.csv" \
     | sed 's/ID/IID/g' \
     | awk 'BEGIN{FS=",";OFS="\t";}{a[1]=$1;a[2]=$2;asort(a);print a[1],a[2],$5,$6}' \
     > "${OUTPUT_DIR}/divStats/tmp_kin1"
