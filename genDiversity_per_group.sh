@@ -131,3 +131,26 @@ else
 fi
 Rscript scripts/pca_plots.R "$pca_prefix" "$eigenvec_suffix" "$color_column" "$out_png" "$n_pcs" numeric
 rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
+
+##########################################
+## GPA per-group reference file 1: pruned.${rg}.afreq (feeds --read-freq below)
+##########################################
+## Allele frequencies on the LD-pruned SNP set for this group. For wholePop
+## this is equivalent to computing AF on all reference samples.
+pruned_afreq="${OUTPUT_DIR}/LD_pruned/pruned.${rg}.afreq"
+plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+    --keep "$samples_rg" \
+    --freq \
+    --output-chr 'chrM' --out "${OUTPUT_DIR}/LD_pruned/pruned.${rg}"
+rclone -v copy "$pruned_afreq" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Ae/" --drive-shared-with-me
+
+##########################################
+## GPA per-group reference file 2: F_SNP het stats (group AF via --read-freq)
+##########################################
+het_rg_prefix="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.${rg}"
+plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+    --keep "$samples_rg" \
+    --het 'cols=fid,hom,het,nobs,f' \
+    --read-freq "$pruned_afreq" \
+    --output-chr 'chrM' --out "$het_rg_prefix"
+rclone -v copy "${het_rg_prefix}.het" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/het_and_COI/" --drive-shared-with-me
