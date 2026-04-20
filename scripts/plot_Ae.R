@@ -3,7 +3,11 @@ library(dplyr)
 library(tidyr)
 
 # --- CONFIGURATION ---
-base_path <- "LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.norm.phased.LD_prune.freq_stats"
+# Usage: Rscript plot_Ae.R <output_dir>
+args <- commandArgs(trailingOnly = TRUE)
+if (length(args) < 1) stop("Usage: Rscript plot_Ae.R <output_dir>", call. = FALSE)
+out_dir   <- args[1]
+base_path <- file.path(out_dir, "LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.norm.phased.LD_prune.freq_stats")
 gaits <- c("Trotter", "Pacer")
 book_sizes <- c("LOW", "MEDIUM", "HIGH")
 
@@ -82,5 +86,5 @@ p <- ggplot(plot_data, aes(x = BookSize, y = Ae, fill = BookSize)) +
 #print(p)
 
 # Save for publication (TIFF/PDF are standard)
-ggsave("divStats/Figure_Ae_BookSize.tiff", plot = p, width = 8, height = 6, dpi = 300)
-ggsave("divStats/Figure_Ae_BookSize.pdf", plot = p, width = 8, height = 6)
+ggsave(file.path(out_dir, "divStats", "Figure_Ae_BookSize.tiff"), plot = p, width = 8, height = 6, dpi = 300)
+ggsave(file.path(out_dir, "divStats", "Figure_Ae_BookSize.pdf"), plot = p, width = 8, height = 6)

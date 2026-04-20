@@ -55,14 +55,11 @@ Structurally the script is **not** 8 cleanly numbered sections. It has 5 `log "S
 | `ROHRM_Creator.py` | Builds the ROH-based Relationship Matrix (ROHRM) — implements Howard et al. C++ logic in Python using window-based haplotype matching on phased VCF data |
 | `ROH_analysis.py` | ROH region identification and statistics from VCF files |
 | `analysis_comparison.py` | Compares ROHRM vs standard GRM; `RobustMatrixComparator` class |
-| `summary_roh.py` | ROH summary statistics grouped by subpopulation (3 numeric columns, factor at col 4). Used at `genDiversity.sh:950` |
-| `summary_roh_v2.py` | Variant of `summary_roh.py` accepting a 4th numeric column and inlining `format_stats` instead of importing from `utils.py`. Used at `genDiversity.sh:1101, 1108`. Consolidation candidate — see `REFACTORING.md` §11 |
+| `summary_roh.py` | ROH summary statistics grouped by subpopulation. `-n/--n-numeric-cols N` (default 3) controls how many numeric columns are summarised; the column right after the numeric block is the grouping factor |
 | `summary_het.py` | Heterozygosity summary stats (observed/expected, F-coefficients) |
 | `roh_plot.py` | Scatter plots correlating F_ROH vs consensus ROH sharing |
 | `roh_histograms.py` | Unified histogram script: use `--metric ratio` (ROH_shared/F_ROH) or `--metric shared` (Percent_of_Consensus_ROH) |
 | `utils.py` | Shared constants (`BOOK_SIZE_ORDER`, `BOOK_SIZE_COLORS`) and `format_stats()` used by summary scripts |
-
-Scripts in `scripts/sandbox/` are experimental variants not used in the main pipeline.
 
 All Python scripts use `argparse`; run with `--help` to see usage.
 
@@ -76,30 +73,29 @@ Grouped by role. Each script's `genDiversity.sh` call site in parentheses.
 |--------|---------|
 | `pca_plots.R` | Unified PCA plots: positional args `<prefix> <eigenvec_suffix> <color_col> <output.png> [n_pcs=3] [color_type=factor\|numeric]` |
 
-**Correlation heatmaps & scatterplot matrices** — four versions coexist, each wired in at a different pipeline stage with different input sets. Consolidation is on the backlog (see `REFACTORING.md` §2).
+**Correlation heatmaps & scatterplot matrices** — one script, four modes (formerly `correlation_plot_multiway{,_v2,_v2e,_v3}.R`):
 
-| Script | Used at | Purpose |
-|--------|---------|---------|
-| `correlation_plot_multiway.R` | `genDiversity.sh:796, 821, 846, 964` | Initial version: `<homo_file> <het_file> <out_prefix>` |
-| `correlation_plot_multiway_v2.R` | `genDiversity.sh:1263` | Adds F_ROH stats input |
-| `correlation_plot_multiway_v2e.R` | `genDiversity.sh:1270` | v2 + consensus-share input |
-| `correlation_plot_multiway_v3.R` | `genDiversity.sh:1427` | Adds KING-IBS and Euclidean-distance inputs |
+| Script + mode | Inputs | Purpose |
+|---------------|--------|---------|
+| `correlation_plot.R --mode basic` | `<homo_file> <het_file>` | KB, KBAVG, HET_diff, F (individual-level) |
+| `correlation_plot.R --mode froh` | `<diag_file> <het_file> <froh_file>` | F_SNP, F_ROH, D_ROH, D_STD |
+| `correlation_plot.R --mode froh-cons` | `<diag_file> <het_file> <froh_file> <cons_file>` | Adds ROH_sh (consensus share) |
+| `correlation_plot.R --mode pairwise` | `<diag_file> <kingkin_file> <eucl_file>` | Pair-level: G_STD, G_ROH, King_kin, IBS |
 
 **Scatter plots:**
 
-| Script | Used at | Purpose |
-|--------|---------|---------|
-| `plot_correlation.R` | `genDiversity.sh:1335, 1413` | Scatter of two columns with single-column color |
-| `plot_correlation_withColorsAndShapes.R` | `genDiversity.sh:1281–1302` | Scatter with both color and shape mappings |
-| `plot_correlation_withColors.R` | only in commented-out call at `genDiversity.sh:1276` | Currently unused — see `REFACTORING.md` §3 |
+| Script | Purpose |
+|--------|---------|
+| `plot_correlation.R` | Scatter of two columns with single-column color |
+| `plot_correlation_withColorsAndShapes.R` | Scatter with both color and shape mappings |
 
-**Statistics / plotting scripts** (hard-coded input paths, no CLI args — pipeline invokes them with no arguments; outputs captured by stdout redirects where applicable):
+**Statistics / plotting scripts** (hard-coded input paths rooted at `results_<timestamp>/`, no CLI args):
 
-| Script | Used at | Purpose |
-|--------|---------|---------|
-| `fst_stats.R` | `genDiversity.sh:690` | FST statistics across subpopulations; output captured to `divStats/fst_stats.txt` |
-| `plot_Ae.R` | `genDiversity.sh:654` | Violin plots of effective allele number (Ae) by gait and book size |
-| `effAllele_stats.R` | `genDiversity.sh:653` | Effect size analysis for Ae; output captured to `divStats/effAllele_stats.txt` |
+| Script | Purpose |
+|--------|---------|
+| `fst_stats.R` | FST statistics across subpopulations; stdout captured to `results_<timestamp>/divStats/fst_stats.txt`; writes `results_<timestamp>/divStats/Fst_Analysis_Results_Adjusted.csv` |
+| `plot_Ae.R` | Violin plots of effective allele number (Ae) by gait and book size |
+| `effAllele_stats.R` | Effect size analysis for Ae; stdout captured to `results_<timestamp>/divStats/effAllele_stats.txt` |
 
 ### Data Flow
 
@@ -115,7 +111,16 @@ Google Drive (rclone)
 
 ### Repository layout expectations
 
-`genDiversity.sh` expects two sibling repositories and a configured rclone remote to exist:
+`genDiversity.sh` creates and uses two top-level directories:
+
+- `input_data/` — `SNPdata_iScan_Standardbred/` (downloaded genotypes) and `Miscellaneous_documents_standardbred/` (downloaded metadata).
+- `results_<timestamp>/` — per-run output directory. `<timestamp>` is `YYYYMMDD_HHMMSS` captured when the script starts. Contains `preprocess/`, `dedup/`, `inspect/`, `filtered/`, `LD_pruned/`, `divStats/`, `rep_ROHRM/`, and the run log (`run.log`). Subdir names after the timestamped prefix are unchanged from the pre-refactor layout.
+
+`input_data/` and `results_*/` are in `.gitignore`.
+
+Each run writes its full stdout+stderr to `${OUTPUT_DIR}/run.log` via a `tee` + `exec` redirection set near the top of the script.
+
+`genDiversity.sh` also expects two sibling repositories and a configured rclone remote to exist:
 
 - `../Equine80select_remapper/results/matchingSNPs_binary_consistantMapping.equCab3_map` — EquCab3 remap table
 - `../Horse_parentage_SNPs/equCab3/download/equCab3.fa` + `equCab3_genome.fa.fai` — reference genome
@@ -125,7 +130,7 @@ A fresh clone of `genDiv` alone will fail early with path errors. `REFACTORING.m
 
 ## Key Parameters & Thresholds
 
-All tunable values are centralized in the CONFIG block at `genDiversity.sh:4-35`. Highlights:
+All tunable values are centralized in the CONFIG block at the top of `genDiversity.sh` (search for `# CONFIG`). Highlights:
 
 - **Genome & data**
   - Reference: EquCab3
@@ -148,6 +153,9 @@ All tunable values are centralized in the CONFIG block at `genDiversity.sh:4-35`
   - `pct=25` (min % samples in ROH to define consensus region)
   - `CONSENSUS_MIN_MB=0.5`
   - `ROH_THRESHOLD_SD=3.0` (window SNP-count filter)
+- **Directory layout**
+  - `INPUT_DIR="input_data"`
+  - `OUTPUT_DIR="results_$(date +%Y%m%d_%H%M%S)"` — fresh timestamped folder every run
 - **Phasing:** BEAGLE (required before `ROHRM_Creator.py`)
 
 ## Running Individual Python Scripts

@@ -1,9 +1,13 @@
 library(effsize)
 
 # --- CONFIGURATION ---
+# Usage: Rscript effAllele_stats.R <output_dir>
+args <- commandArgs(trailingOnly = TRUE)
+if (length(args) < 1) stop("Usage: Rscript effAllele_stats.R <output_dir>", call. = FALSE)
+out_dir   <- args[1]
 gaits <- c("Trotter", "Pacer")
 book_sizes <- c("LOW", "MEDIUM", "HIGH")
-base_path <- "LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.norm.phased.LD_prune.freq_stats"
+base_path <- file.path(out_dir, "LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.norm.phased.LD_prune.freq_stats")
 
 # --- ROBUST DATA LOADER ---
 load_data <- function(filename, group_label) {

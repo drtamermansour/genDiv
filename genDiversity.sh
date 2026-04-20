@@ -7,7 +7,7 @@ set -eo pipefail
 # Paths (relative to the parent directory of this repo)
 equCab3_map="$(pwd)/../Equine80select_remapper/results_E80selv2_to_equCab3noAlt_genDiv/qc/Equine80select_v2_1_HTS_20143333_B1_UCD_allele_map_equCab3noAlt.tsv"
 ref="../Horse_parentage_SNPs/equCab3/download/equCab3.fa"
-reference_fai="$HOME/Equine80select_remapper/equCab3/equCab3_genome.fa.fai"
+reference_fai="../Horse_parentage_SNPs/equCab3/equCab3_genome.fa.fai"
 GDRIVE_BASE="remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs"
 
 # Threads and reproducibility
@@ -34,6 +34,10 @@ CONSENSUS_MIN_MB=0.5    # Minimum consensus ROH region size (Mb)
 PRIMARY_ROH_MB=1.0      # Primary ROH window cutoff used in downstream analyses
 ROH_CUTOFFS="1.0 5.0 10.0"   # All ROH window cutoffs to evaluate
 
+# Directory layout (relative to the working directory)
+INPUT_DIR="input_data"                                    # holds downloaded inputs (SNPdata + metadata)
+OUTPUT_DIR="results_$(date +%Y%m%d_%H%M%S)"               # per-run output dir; each invocation creates a fresh timestamped folder
+
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
@@ -56,78 +60,87 @@ trap 'echo "ERROR: Pipeline failed at line $LINENO (exit code $?)" >&2' ERR
 work_dir=$(pwd)
 scripts="$(pwd)/scripts"
 
+## Tee stdout+stderr into a log file under the timestamped output dir so every run leaves a durable record.
+mkdir -p "${OUTPUT_DIR}"
+RUN_LOG="${OUTPUT_DIR}/run.log"
+exec > >(tee -a "$RUN_LOG") 2>&1
+log "Output dir: ${OUTPUT_DIR}"
+log "Pipeline log: ${RUN_LOG}"
+
 ## Download genotyping data (PLINK: ped and map files)
 log "Section 1: Downloading data"
 module load rclone ## Loading rclone/1.65.1
-mkdir -p SNPdata_iScan_Standardbred
-SNPdata="$(pwd)/SNPdata_iScan_Standardbred"
+mkdir -p "${INPUT_DIR}/SNPdata_iScan_Standardbred"
+SNPdata="$(pwd)/${INPUT_DIR}/SNPdata_iScan_Standardbred"
 #rclone lsd remote_UCDavis_GoogleDr: --drive-shared-with-me
 rclone -v copy "remote_UCDavis_GoogleDr:STR_Imputation_2025/SNP data - iScan_Standardbred" --drive-shared-with-me --include "USTA_Diversit*" $SNPdata/.
 
 ## Download metadata
-mkdir -p Miscellaneous_documents_standardbred
-docs="$(pwd)/Miscellaneous_documents_standardbred"
+mkdir -p "${INPUT_DIR}/Miscellaneous_documents_standardbred"
+docs="$(pwd)/${INPUT_DIR}/Miscellaneous_documents_standardbred"
 #rclone -v copy "remote_UCDavis_GoogleDr:STR_Imputation_2025/Miscellaneous documents_standardbred/USTA_Gait_BookSize_Assignments_Sex_Added.xlsx" --drive-shared-with-me $docs/.
 rclone -v copy "remote_UCDavis_GoogleDr:STR_Imputation_2025/updated_resources/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.xlsx" --drive-shared-with-me $docs/.
 rclone -v copy "remote_UCDavis_GoogleDr:STR_Imputation_2025/updated_resources/QC excluded samples/trotters_toExclude.lst" --drive-shared-with-me $docs/.
 rclone -v copy "remote_UCDavis_GoogleDr:STR_Imputation_2025/updated_resources/QC excluded samples/pacers_toExclude.lst" --drive-shared-with-me $docs/.
 
-python3 - <<'EOF'
+DOCS_DIR="$docs" python3 - <<'EOF'
+import os
 import pandas as pd
-df = pd.read_excel("Miscellaneous_documents_standardbred/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.xlsx", sheet_name="Sheet1")
-df.to_csv("Miscellaneous_documents_standardbred/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv", index=False)
+docs = os.environ["DOCS_DIR"]
+df = pd.read_excel(os.path.join(docs, "USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.xlsx"), sheet_name="Sheet1")
+df.to_csv(os.path.join(docs, "USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv"), index=False)
 EOF
 
 ## create a tsv version of the metadata
 cat $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv | tr ' ' '_' | tr ',' '\t' > $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.tsv
 
 ## QC and preprocessingx
-mkdir -p preprocess
+mkdir -p ${OUTPUT_DIR}/preprocess
 ## check metadata
 ## Confrim that each sire show up in one book size
 tail -n+2 $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv | \
-    cut -d"," -f5,7 | sort -t"," -k2,2 | uniq > preprocess/sire_book
+    cut -d"," -f5,7 | sort -t"," -k2,2 | uniq > ${OUTPUT_DIR}/preprocess/sire_book
 awk 'BEGIN{FS=","}{horses[$2]++}END{ \
 	if(length(horses) < NR) { \
 		print "Oops! We have these duplicate sires in the input BookSize file." > "/dev/stderr"; \
 		for(h in horses) { if(horses[h]>1) print h } \
 	} else { print "Good! No duplicate sires in the in the input BookSize file." > "/dev/stderr";} \
-}' preprocess/sire_book | grep -Fwf - preprocess/sire_book || true
+}' ${OUTPUT_DIR}/preprocess/sire_book | grep -Fwf - ${OUTPUT_DIR}/preprocess/sire_book || true
 
 ## Identify full siblings 
 tail -n+2 $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv | \
     cut -d"," -f1-5,7-8 | sort -t"," -k3,3 -k6,6 -k7,7 | \
-    awk 'BEGIN{FS=","}{ key = $6 OFS $7 } seen[key]++ { print prev_line ORS $0; next } { prev_line = $0 }' | cut -d, -f1 | paste - - > preprocess/full_siblings
+    awk 'BEGIN{FS=","}{ key = $6 OFS $7 } seen[key]++ { print prev_line ORS $0; next } { prev_line = $0 }' | cut -d, -f1 | paste - - > ${OUTPUT_DIR}/preprocess/full_siblings
 
 ## read genotypes (PLINK: bed + bim + fam files are writtin)
 plink --file $SNPdata/USTA_Diversity_Study --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-        --output-chr 'M' --out preprocess/USTA_Diversity_Study_noSex
+        --output-chr 'M' --out ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study_noSex
 
 ## Update of ids (e.g., change HR15423_1 to HR15423)
-cat preprocess/USTA_Diversity_Study_noSex.fam | tr ' ' '\t' | cut -f1-2 | grep "_" > preprocess/USTA_Diversity_Study_noSex.cur_ids
-sed 's/_.*//' preprocess/USTA_Diversity_Study_noSex.cur_ids > preprocess/USTA_Diversity_Study_noSex.new_ids
-paste preprocess/USTA_Diversity_Study_noSex.cur_ids preprocess/USTA_Diversity_Study_noSex.new_ids > preprocess/USTA_Diversity_Study_noSex.update_ids
-plink --bfile preprocess/USTA_Diversity_Study_noSex --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-        --update-ids preprocess/USTA_Diversity_Study_noSex.update_ids \
-        --make-bed --output-chr 'M' --out preprocess/USTA_Diversity_Study_noSex_updatedIDs
+cat ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study_noSex.fam | tr ' ' '\t' | cut -f1-2 | grep "_" > ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study_noSex.cur_ids
+sed 's/_.*//' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study_noSex.cur_ids > ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study_noSex.new_ids
+paste ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study_noSex.cur_ids ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study_noSex.new_ids > ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study_noSex.update_ids
+plink --bfile ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study_noSex --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+        --update-ids ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study_noSex.update_ids \
+        --make-bed --output-chr 'M' --out ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study_noSex_updatedIDs
 
 ## Add sex metadata
-cat preprocess/USTA_Diversity_Study_noSex_updatedIDs.fam | tr ' ' '\t' | cut -f1-2 | tr '\t' ',' > preprocess/USTA_Diversity_Study.ids
+cat ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study_noSex_updatedIDs.fam | tr ' ' '\t' | cut -f1-2 | tr '\t' ',' > ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.ids
 awk 'BEGIN{FS=",";OFS="\t"}FNR==NR{a[$1]=$2;next}{if(a[$2])print $1,$2,a[$2];}' \
-    $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv preprocess/USTA_Diversity_Study.ids > preprocess/USTA_Diversity_Study.sex
-plink --bfile preprocess/USTA_Diversity_Study_noSex_updatedIDs --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-        --update-sex preprocess/USTA_Diversity_Study.sex \
-        --make-bed --output-chr 'M' --out preprocess/USTA_Diversity_Study
+    $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.ids > ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.sex
+plink --bfile ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study_noSex_updatedIDs --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+        --update-sex ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.sex \
+        --make-bed --output-chr 'M' --out ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study
 
 ## Create ID lists
 awk 'BEGIN{FS=",";OFS="\t"}FNR==NR{a[$1]=$3;next}{if(a[$2])print $1,$2,a[$2];}' \
-    $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv preprocess/USTA_Diversity_Study.ids | grep -vFwf <(cat $docs/{trotters,pacers}_toExclude.lst) > preprocess/USTA_Diversity_Study.gait ## 558
+    $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.ids | grep -vFwf <(cat $docs/{trotters,pacers}_toExclude.lst) > ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait ## 558
 
 awk 'BEGIN{FS=",";OFS="\t"}FNR==NR{a[$1]=$5;next}{if(a[$2])print $1,$2,a[$2];}' \
-    $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv preprocess/USTA_Diversity_Study.ids > preprocess/USTA_Diversity_Study.bookSize ## 576
+    $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.ids > ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.bookSize ## 576
 
 awk 'BEGIN{FS=OFS="\t"} NR==FNR {a[$2]=$3;next}{if(a[$2])print $1,$2,a[$2]"_"$3}' \
-    preprocess/USTA_Diversity_Study.gait preprocess/USTA_Diversity_Study.bookSize > preprocess/USTA_Diversity_Study.gait_bookSize ## 558
+    ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.bookSize > ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize ## 558
 
 ##########################################
 ## Remapping to EquCab3 coordinates
@@ -138,135 +151,135 @@ log "Section 2: Remapping to EquCab3"
 ## This map allows updating the input alleles (using their IDs) into the SNP_alleles (i.e., Manifest alleles) or genomic_alleles (i.e., Positive Strand alleles = VCF alleles).
 ## In either case, their is a ref_allele to use in PLINK2
 ## check if the SNP alleles in BIM match those in the equCab3_map file
-cat preprocess/USTA_Diversity_Study.bim | awk 'BEGIN{FS=OFS="\t"}{if($5 && $6){a[1]=$5;a[2]=$6;asort(a);print $2,a[1]","a[2]}}' > preprocess/tmpX_alleles_in_BIM.txt ## e.g., "UKUL1_ilmndup1  A,G"
-tail -n+2 $equCab3_map | awk 'BEGIN{FS=OFS="\t"}{split($4, a, ",");asort(a);split($5, b, ",");asort(b);print $3,a[1]","a[2],b[1]","b[2]}' > preprocess/tmpX_alleles_in_MAP.txt ## e.g., "21962991_Curly_f_ilmndup1       A,G     A,G"
+cat ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.bim | awk 'BEGIN{FS=OFS="\t"}{if($5 && $6){a[1]=$5;a[2]=$6;asort(a);print $2,a[1]","a[2]}}' > ${OUTPUT_DIR}/preprocess/tmpX_alleles_in_BIM.txt ## e.g., "UKUL1_ilmndup1  A,G"
+tail -n+2 $equCab3_map | awk 'BEGIN{FS=OFS="\t"}{split($4, a, ",");asort(a);split($5, b, ",");asort(b);print $3,a[1]","a[2],b[1]","b[2]}' > ${OUTPUT_DIR}/preprocess/tmpX_alleles_in_MAP.txt ## e.g., "21962991_Curly_f_ilmndup1       A,G     A,G"
 awk 'BEGIN{FS=OFS="\t"}FNR==NR{a[$1]=$2;next}{if(a[$1])print $1,a[$1],$2,$3;}' \
-    preprocess/tmpX_alleles_in_BIM.txt preprocess/tmpX_alleles_in_MAP.txt > preprocess/tmpX_compare_BIM_MAP.txt ## SNP_ID \t BIM_alleles \t MAP_SNP_alleles \t MAP_genomic_alleles
-awk 'BEGIN{FS=OFS="\t"}{if($2!=$3)a+=1;if($2!=$4)b+=1;}END{print "mismatching SNP alleles:",a," mismatching genomic alleles:",b;}' preprocess/tmpX_compare_BIM_MAP.txt
+    ${OUTPUT_DIR}/preprocess/tmpX_alleles_in_BIM.txt ${OUTPUT_DIR}/preprocess/tmpX_alleles_in_MAP.txt > ${OUTPUT_DIR}/preprocess/tmpX_compare_BIM_MAP.txt ## SNP_ID \t BIM_alleles \t MAP_SNP_alleles \t MAP_genomic_alleles
+awk 'BEGIN{FS=OFS="\t"}{if($2!=$3)a+=1;if($2!=$4)b+=1;}END{print "mismatching SNP alleles:",a," mismatching genomic alleles:",b;}' ${OUTPUT_DIR}/preprocess/tmpX_compare_BIM_MAP.txt
 ## mismatching SNP alleles:        35961    mismatching genomic alleles:   36685
 ## Let us remove the ambiguous SNPs (A/T or C/G) from the analysis to avoid strand issues
-awk 'BEGIN{FS=OFS="\t"}{if($4=="A,T" || $4=="T,A" || $4=="C,G" || $4=="G,C")print $3}' $equCab3_map > preprocess/ambiguous_snps.txt ## 262
+awk 'BEGIN{FS=OFS="\t"}{if($4=="A,T" || $4=="T,A" || $4=="C,G" || $4=="G,C")print $3}' $equCab3_map > ${OUTPUT_DIR}/preprocess/ambiguous_snps.txt ## 262
 ## Also, let us remove the SNPs on unplaced Scaffolds
-cat $equCab3_map | grep ^Un_NW | cut -f3 > preprocess/unplaced_snps.txt
+cat $equCab3_map | grep ^Un_NW | cut -f3 > ${OUTPUT_DIR}/preprocess/unplaced_snps.txt
 
 ## 1. select the variants to keep  
 ## 2. update chr/positions based on the equCab3_map
 ## 3. update -ve strand SNP alleles to postive strand version
-tail -n+2 $equCab3_map | cut -f3 | grep -v -f <(cat preprocess/ambiguous_snps.txt preprocess/unplaced_snps.txt) > preprocess/snps_to_remap.txt ## 79314
-tail -n+2 $equCab3_map | awk 'BEGIN{FS=OFS="\t"}{print $5}' | tr 'TCGA' 'AGCT' > preprocess/temp_pos_strand_complement.txt ## complementary genomic_alleles
-paste <(tail -n+2 $equCab3_map) preprocess/temp_pos_strand_complement.txt | awk 'BEGIN{FS=OFS="\t"}{print $3,$9,$5}' | tr ',' '\t' > preprocess/pos_strand_alleles.txt ## SNP_ID \t complementary_genomic_alleles \t genomic_alleles
-plink --bfile preprocess/USTA_Diversity_Study --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-    --extract preprocess/snps_to_remap.txt \
+tail -n+2 $equCab3_map | cut -f3 | grep -v -f <(cat ${OUTPUT_DIR}/preprocess/ambiguous_snps.txt ${OUTPUT_DIR}/preprocess/unplaced_snps.txt) > ${OUTPUT_DIR}/preprocess/snps_to_remap.txt ## 79314
+tail -n+2 $equCab3_map | awk 'BEGIN{FS=OFS="\t"}{print $5}' | tr 'TCGA' 'AGCT' > ${OUTPUT_DIR}/preprocess/temp_pos_strand_complement.txt ## complementary genomic_alleles
+paste <(tail -n+2 $equCab3_map) ${OUTPUT_DIR}/preprocess/temp_pos_strand_complement.txt | awk 'BEGIN{FS=OFS="\t"}{print $3,$9,$5}' | tr ',' '\t' > ${OUTPUT_DIR}/preprocess/pos_strand_alleles.txt ## SNP_ID \t complementary_genomic_alleles \t genomic_alleles
+plink --bfile ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+    --extract ${OUTPUT_DIR}/preprocess/snps_to_remap.txt \
     --update-chr $equCab3_map 1 3 1 \
     --update-map $equCab3_map 2 3 1 \
-    --update-alleles preprocess/pos_strand_alleles.txt \
-    --make-bed --output-chr 'M' --out preprocess/USTA_Diversity_Study.remap ## input BIM has 79,259 ==> 76,841 remaining
+    --update-alleles ${OUTPUT_DIR}/preprocess/pos_strand_alleles.txt \
+    --make-bed --output-chr 'M' --out ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap ## input BIM has 79,259 ==> 76,841 remaining
 
 ## 4. update genomic alleles to fill in missing alleles (useless but just to be complete and make sure no snps will show up as mismtach in the next step)
-tail -n+2 $equCab3_map | awk 'BEGIN{FS=OFS="\t"}{print $3,$5,$5}' | tr ',' '\t' > preprocess/genomic_alleles.txt ## SNP_ID \t genomic_alleles \t genomic_alleles
-plink --bfile preprocess/USTA_Diversity_Study.remap --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-    --update-alleles preprocess/genomic_alleles.txt \
-    --make-bed --output-chr 'M' --out preprocess/USTA_Diversity_Study.remap
+tail -n+2 $equCab3_map | awk 'BEGIN{FS=OFS="\t"}{print $3,$5,$5}' | tr ',' '\t' > ${OUTPUT_DIR}/preprocess/genomic_alleles.txt ## SNP_ID \t genomic_alleles \t genomic_alleles
+plink --bfile ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+    --update-alleles ${OUTPUT_DIR}/preprocess/genomic_alleles.txt \
+    --make-bed --output-chr 'M' --out ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap
 
 ## check if the SNP alleles in BIM match genomic_alleles in the equCab3_map file after strand update
-cat preprocess/USTA_Diversity_Study.remap.bim | awk 'BEGIN{FS=OFS="\t"}{a[1]=$5;a[2]=$6;asort(a);print $2,a[1]","a[2]}' > preprocess/tmpX_alleles_in_remap.BIM.txt
+cat ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap.bim | awk 'BEGIN{FS=OFS="\t"}{a[1]=$5;a[2]=$6;asort(a);print $2,a[1]","a[2]}' > ${OUTPUT_DIR}/preprocess/tmpX_alleles_in_remap.BIM.txt
 awk 'BEGIN{FS=OFS="\t"}FNR==NR{a[$1]=$2;next}{if(a[$1])print $1,a[$1],$2,$3;}' \
-    preprocess/tmpX_alleles_in_remap.BIM.txt preprocess/tmpX_alleles_in_MAP.txt > preprocess/tmpX_compare_remap.BIM_MAP.txt ## SNP_ID \t BIM_alleles \t MAP_SNP_alleles \t MAP_genomic_alleles
-awk 'BEGIN{FS=OFS="\t";a=b=0;}{if($2!=$3)a+=1;if($2!=$4)b+=1;}END{print "mismatching SNP alleles:",a," mismatching genomic alleles:",b;}' preprocess/tmpX_compare_remap.BIM_MAP.txt
+    ${OUTPUT_DIR}/preprocess/tmpX_alleles_in_remap.BIM.txt ${OUTPUT_DIR}/preprocess/tmpX_alleles_in_MAP.txt > ${OUTPUT_DIR}/preprocess/tmpX_compare_remap.BIM_MAP.txt ## SNP_ID \t BIM_alleles \t MAP_SNP_alleles \t MAP_genomic_alleles
+awk 'BEGIN{FS=OFS="\t";a=b=0;}{if($2!=$3)a+=1;if($2!=$4)b+=1;}END{print "mismatching SNP alleles:",a," mismatching genomic alleles:",b;}' ${OUTPUT_DIR}/preprocess/tmpX_compare_remap.BIM_MAP.txt
 ## mismatching SNP alleles:        35417    mismatching genomic alleles:   0
 
 ##########################################
 ## deduplication of SNPs based on chromosome and position
 ##########################################
-mkdir -p dedup
+mkdir -p ${OUTPUT_DIR}/dedup
 # 1. compute per-SNP missingness:
-plink --bfile preprocess/USTA_Diversity_Study.remap --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+plink --bfile ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
       --missing \
-      --output-chr 'chrM' --out dedup/USTA_Diversity_Study.remap.missing
+      --output-chr 'chrM' --out ${OUTPUT_DIR}/dedup/USTA_Diversity_Study.remap.missing
 # 2. list positions that occur more than once (chr:bp repeated):
-awk '{print $1":"$4}' preprocess/USTA_Diversity_Study.remap.bim | sort | uniq -c | awk '$1>1{print $2}' > dedup/dup_positions.txt
+awk '{print $1":"$4}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap.bim | sort | uniq -c | awk '$1>1{print $2}' > ${OUTPUT_DIR}/dedup/dup_positions.txt
 # 3. extract SNP IDs at those duplicate positions:
 # produce tab: SNP_ID <TAB> CHR:BP
-awk 'BEGIN{FS=OFS="\t"} {print $2, $1":"$4}' preprocess/USTA_Diversity_Study.remap.bim > dedup/bim_pos.tsv
+awk 'BEGIN{FS=OFS="\t"} {print $2, $1":"$4}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap.bim > ${OUTPUT_DIR}/dedup/bim_pos.tsv
 
 # keep only rows where position is duplicated
-grep -F -f dedup/dup_positions.txt dedup/bim_pos.tsv > dedup/duplicates_snps.tsv
+grep -F -f ${OUTPUT_DIR}/dedup/dup_positions.txt ${OUTPUT_DIR}/dedup/bim_pos.tsv > ${OUTPUT_DIR}/dedup/duplicates_snps.tsv
 # duplicates_snps.tsv: SNP_ID <TAB> CHR:BP (only positions that had >1 SNP)
 
 # 4. join missingness to those SNPs and pick the best per position (lowest F_MISS = highest call rate)
 # prepare a quick lookup of missingness: SNP_ID <TAB> F_MISS
-awk 'BEGIN{OFS="\t"}NR>1{print $2, $5}' dedup/USTA_Diversity_Study.remap.missing.lmiss > dedup/snp_miss.tsv
+awk 'BEGIN{OFS="\t"}NR>1{print $2, $5}' ${OUTPUT_DIR}/dedup/USTA_Diversity_Study.remap.missing.lmiss > ${OUTPUT_DIR}/dedup/snp_miss.tsv
 
 # join: we want lines with SNP_ID, POS, F_MISS
-awk 'BEGIN{FS=OFS="\t"} NR==FNR{miss[$1]=$2; next} {print $1,$2,miss[$1]}' dedup/snp_miss.tsv dedup/duplicates_snps.tsv > dedup/dup_with_miss.tsv
+awk 'BEGIN{FS=OFS="\t"} NR==FNR{miss[$1]=$2; next} {print $1,$2,miss[$1]}' ${OUTPUT_DIR}/dedup/snp_miss.tsv ${OUTPUT_DIR}/dedup/duplicates_snps.tsv > ${OUTPUT_DIR}/dedup/dup_with_miss.tsv
 # dup_with_miss.tsv columns: SNP_ID  CHR:BP  F_MISS
 
 # sort by position then by F_MISS ascending and pick the first SNP (best) per position
-sort -k2,2 -k3,3n dedup/dup_with_miss.tsv | awk -F"\t" '{
+sort -k2,2 -k3,3n ${OUTPUT_DIR}/dedup/dup_with_miss.tsv | awk -F"\t" '{
   pos=$2;
   if(!(pos in seen)){ print $1"\t"$2"\t"$3; seen[pos]=1}
-}' > dedup/best_per_pos.tsv
+}' > ${OUTPUT_DIR}/dedup/best_per_pos.tsv
 # best_per_pos.tsv: selected SNP_ID per duplicated position (the ones we keep)
 
 # 5. produce a list of SNPs to remove (all duplicates except the selected ones):
 # all duplicated SNP IDs:
-cut -f1 dedup/duplicates_snps.tsv > dedup/all_dup_ids.txt
+cut -f1 ${OUTPUT_DIR}/dedup/duplicates_snps.tsv > ${OUTPUT_DIR}/dedup/all_dup_ids.txt
 # selected to keep:
-cut -f1 dedup/best_per_pos.tsv > dedup/keep_ids.txt
+cut -f1 ${OUTPUT_DIR}/dedup/best_per_pos.tsv > ${OUTPUT_DIR}/dedup/keep_ids.txt
 # produce remove list = setdiff(all_dup_ids - keep_ids)
-grep -v -Fwf dedup/keep_ids.txt dedup/all_dup_ids.txt > preprocess/remove_dup_ids.txt
+grep -v -Fwf ${OUTPUT_DIR}/dedup/keep_ids.txt ${OUTPUT_DIR}/dedup/all_dup_ids.txt > ${OUTPUT_DIR}/preprocess/remove_dup_ids.txt
 
 # 6. remove them with PLINK:
-plink --bfile preprocess/USTA_Diversity_Study.remap --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-    --exclude preprocess/remove_dup_ids.txt --make-bed \
-    --output-chr 'chrM' --out preprocess/USTA_Diversity_Study.remap.dedup
+plink --bfile ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+    --exclude ${OUTPUT_DIR}/preprocess/remove_dup_ids.txt --make-bed \
+    --output-chr 'chrM' --out ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap.dedup
 # 76841 variants loaded from .bim file.
 # 71548 variants pass filters and QC.
 
 ## Convert PLINK.1 files to PLINK.2 binary format
-plink2 --bfile preprocess/USTA_Diversity_Study.remap.dedup --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+plink2 --bfile ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap.dedup --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
         --ref-allele 'force' $equCab3_map 7 3 1 --real-ref-alleles \
         --make-pgen --sort-vars \
-        --output-chr 'chrM' --out preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2
+        --output-chr 'chrM' --out ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2
 
 ##########################################
 ## Data exploration
 ##########################################
-mkdir -p inspect
+mkdir -p ${OUTPUT_DIR}/inspect
 ## --check-sex compares sex assignments in the input dataset with those imputed from chrX inbreeding coefficients 
 ## Preliminary run of --check-sex without removing PAR regions
-plink2 --pfile preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2 \
+plink2 --pfile ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2 \
       --check-sex max-female-xf=$SEX_MAX_FEMALE_XF min-male-xf=$SEX_MIN_MALE_XF \
-      --output-chr 'chrM' --out inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.sex
-tail -n+2 inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.sex.sexcheck | tr ' ' '\t' | cut -f3-5 | sort | uniq -c
+      --output-chr 'chrM' --out ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.sex
+tail -n+2 ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.sex.sexcheck | tr ' ' '\t' | cut -f3-5 | sort | uniq -c
 #    285 1       1       OK
 #    247 2       2       OK
 #     44 2       NA      PROBLEM
 
 ## Histogram of X chromosome inbreeding coefficients (output of preliminary --check-sex)
 awk -v size=0.05 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($6/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
-                    END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(tail -n+2 inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.sex.sexcheck) > inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.sex.sexcheck.histo
+                    END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(tail -n+2 ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.sex.sexcheck) > ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.sex.sexcheck.histo
 
 ## Define Par regions and remove them (using high confidence males)
-awk '$6 > 0.95 {print $1, $2}' inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.sex.sexcheck > inspect/hiConf_males.txt
-#plink2 --pfile preprocess/USTA_Diversity_Study --keep inspect/hiConf_males.txt --het --out inspect/male_het
-cat preprocess/USTA_Diversity_Study.sex  | awk 'BEGIN{FS=OFS="\t"}{print $1,$2,"0"}' > preprocess/USTA_Diversity_Study.NoSex 
-plink2 --pfile preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2 \
-       --keep inspect/hiConf_males.txt --update-sex preprocess/USTA_Diversity_Study.NoSex --geno-counts --out inspect/freqx_male
-head -n1  inspect/freqx_male.gcount >  inspect/freqx_male.X.gcount
-grep "^X" inspect/freqx_male.gcount >>  inspect/freqx_male.X.gcount
-awk 'BEGIN{FS=OFS="\t"}FNR==NR{if($1=="chrX")a[$3]=$2;next}{$1=a[$2];print $0;}' preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.pvar inspect/freqx_male.X.gcount > inspect/freqx_male.X_ann.gcount
+awk '$6 > 0.95 {print $1, $2}' ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.sex.sexcheck > ${OUTPUT_DIR}/inspect/hiConf_males.txt
+#plink2 --pfile ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study --keep ${OUTPUT_DIR}/inspect/hiConf_males.txt --het --out ${OUTPUT_DIR}/inspect/male_het
+cat ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.sex  | awk 'BEGIN{FS=OFS="\t"}{print $1,$2,"0"}' > ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.NoSex 
+plink2 --pfile ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2 \
+       --keep ${OUTPUT_DIR}/inspect/hiConf_males.txt --update-sex ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.NoSex --geno-counts --out ${OUTPUT_DIR}/inspect/freqx_male
+head -n1  ${OUTPUT_DIR}/inspect/freqx_male.gcount >  ${OUTPUT_DIR}/inspect/freqx_male.X.gcount
+grep "^X" ${OUTPUT_DIR}/inspect/freqx_male.gcount >>  ${OUTPUT_DIR}/inspect/freqx_male.X.gcount
+awk 'BEGIN{FS=OFS="\t"}FNR==NR{if($1=="chrX")a[$3]=$2;next}{$1=a[$2];print $0;}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.pvar ${OUTPUT_DIR}/inspect/freqx_male.X.gcount > ${OUTPUT_DIR}/inspect/freqx_male.X_ann.gcount
 ## Heterozygosity is seen until 2063653 which match our expectations (The PAB location on the X chromosome of EquCab2 is located at 1,175,430 bp)
 ## There is no detected coordinates for the tail PAR, thus I will use the position of the last marker + 1
 
 ## --check-sex with removal of PAR and noisy regions
-awk -v par_end=$PAR_END_BP 'BEGIN{FS="\t"}{if($1<par_end || $6>5)print $2}' inspect/freqx_male.X_ann.gcount >  inspect/PAR_and_noise.list
-plink2 --pfile preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2 \
-    --exclude inspect/PAR_and_noise.list \
+awk -v par_end=$PAR_END_BP 'BEGIN{FS="\t"}{if($1<par_end || $6>5)print $2}' ${OUTPUT_DIR}/inspect/freqx_male.X_ann.gcount >  ${OUTPUT_DIR}/inspect/PAR_and_noise.list
+plink2 --pfile ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2 \
+    --exclude ${OUTPUT_DIR}/inspect/PAR_and_noise.list \
     --check-sex max-female-xf=$SEX_MAX_FEMALE_XF min-male-xf=$SEX_MIN_MALE_XF \
-    --output-chr 'chrM' --out inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2_noPAR.sex
+    --output-chr 'chrM' --out ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2_noPAR.sex
 
-tail -n+2 inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2_noPAR.sex.sexcheck | tr ' ' '\t' | cut -f3-5 | sort | uniq -c
+tail -n+2 ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2_noPAR.sex.sexcheck | tr ' ' '\t' | cut -f3-5 | sort | uniq -c
 #    285 1       1       OK
 #    247 2       2       OK
 #     44 2       NA      PROBLEM
@@ -274,28 +287,28 @@ tail -n+2 inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2_noPAR.sex.s
 
 ## Histogram of X chromosome inbreeding coefficients (output of final --check-sex)
 awk -v size=0.05 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($6/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
-                END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(tail -n+2 inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2_noPAR.sex.sexcheck) > inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2_noPAR.sex.sexcheck.histo
+                END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(tail -n+2 ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2_noPAR.sex.sexcheck) > ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2_noPAR.sex.sexcheck.histo
 
 
 ## --het, --missing, --freq, --hardy
-plink2 --pfile preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2 \
+plink2 --pfile ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2 \
       --het --missing --freq --hardy 'midp'  \
-      --output-chr 'chrM' --out inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore
+      --output-chr 'chrM' --out ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore
 
-#--freq: Allele frequencies (founders only) written to inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.afreq .
-#--missing: Sample missing data report written to inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.smiss .
-#--missing: Variant missing data report written to inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.vmiss .
-#--hardy midp: Autosomal Hardy-Weinberg report (founders only) written to inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.hardy .
-#--hardy midp: chrX Hardy-Weinberg report (founders only) written to inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.hardy.x .
+#--freq: Allele frequencies (founders only) written to ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.afreq .
+#--missing: Sample missing data report written to ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.smiss .
+#--missing: Variant missing data report written to ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.vmiss .
+#--hardy midp: Autosomal Hardy-Weinberg report (founders only) written to ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.hardy .
+#--hardy midp: chrX Hardy-Weinberg report (founders only) written to ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.hardy.x .
 #Excluding 3581 variants on non-autosomes from --het.
 #--het: done.
 #Warning: 3937 variants skipped because they were monomorphic. 
 #use --read-freq to provide more accurate allele frequency estimates.
-#--het: Results written to inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het .
+#--het: Results written to ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het .
 
 ## heterozygosity (Postive estimates indicate high homozygosity while negative estimates indicate low homozygosity.)
 awk -v size=0.02 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($6/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
-                END { for(i=bmin;i<=bmax;++i){if(i==0) print -1*size,size,a[i]/1;else if(i<0) print (i-1)*size,i*size,a[i]/1;else print i*size,(i+1)*size,a[i]/1 }}'  <(tail -n+2 inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het) > inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het.histo
+                END { for(i=bmin;i<=bmax;++i){if(i==0) print -1*size,size,a[i]/1;else if(i<0) print (i-1)*size,i*size,a[i]/1;else print i*size,(i+1)*size,a[i]/1 }}'  <(tail -n+2 ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het) > ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het.histo
 
 : <<'COMMENT'
 -0.1    -0.08   3
@@ -318,7 +331,7 @@ awk -v size=0.02 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($6/size); a[b]++; bmax=b>bm
 COMMENT
 
 ## Look as samples with heck-sex problem
-paste inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2_noPAR.sex.sexcheck inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het | cut -f1,2,4,6,9-12 | awk -F"\t" '{if($3=="NA")print}' | sort -t $'\t' -k4,4g > inspect/problem.sexcheck
+paste ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2_noPAR.sex.sexcheck ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het | cut -f1,2,4,6,9-12 | awk -F"\t" '{if($3=="NA")print}' | sort -t $'\t' -k4,4g > ${OUTPUT_DIR}/inspect/problem.sexcheck
 
 
 ## HWE
@@ -330,7 +343,7 @@ awk 'BEGIN{OFS="\t";}{ if($10<1e-50)a["1e-50 or less"]++;
                        else if($10<1e-5)a["1e-5:1e-6"]++; else if($10<1e-4)a["1e-4:1e-5"]++; \
                        else if($10<0.001)a["1e-3:1e-4"]++; else if($10<0.01)a["1e-2:1e-3"]++; \
                        else a["0.01 or more"]++; } \
-                 END { for(i in a) print i,a[i] }'  <(tail -n+2 inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.hardy) | sort -g > inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.hardy.histo
+                 END { for(i in a) print i,a[i] }'  <(tail -n+2 ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.hardy) | sort -g > ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.hardy.histo
 
 : <<'COMMENT'
 1e-50 or less   17
@@ -350,36 +363,36 @@ awk 'BEGIN{OFS="\t";}{ if($10<1e-50)a["1e-50 or less"]++;
 COMMENT
 
 ## Use this to further explore variants with extreme deviation from HWE:
-cat inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.hardy | awk '{if(NR==1)print}{if($10<1e-50)print}' >  inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.hardy.lowHWE
+cat ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.hardy | awk '{if(NR==1)print}{if($10<1e-50)print}' >  ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.hardy.lowHWE
 
 
 
 ## Variants with very low MAF
 # Here are 2 different resolutions for a histogram of MAF:
 awk -v size=0.01 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($6/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
-    END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(tail -n+2 inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.afreq) > inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.frq.histo
+    END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(tail -n+2 ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.afreq) > ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.frq.histo
 awk -v size=0.001 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($6/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
-    END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(tail -n+2 inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.afreq) > inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.frq.histo2
+    END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(tail -n+2 ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.afreq) > ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.frq.histo2
 
 ##########################################
 ## Final filtering based on missingness, MAF, and HWE
 log "Section 3: Filtering (MAF=${MAF}, HWE=${HWE_PVAL}, missingness=${GENO_MISS})"
-mkdir -p filtered
+mkdir -p ${OUTPUT_DIR}/filtered
 
 # Identify possible related dogs.
-plink2 --pfile preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2 \
+plink2 --pfile ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2 \
        --king-cutoff $KING_CUTOFF \
-       --out preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.1st_degree_relatives
+       --out ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.1st_degree_relatives
 # Make sure to include one of each known full siblings
-tail -n+2 preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.1st_degree_relatives.king.cutoff.out.id | cut -f2 | \
-    grep -vFwf - preprocess/full_siblings | cut -f1 | grep -Fwf - preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.psam > preprocess/full_siblings_rep
-cat preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.1st_degree_relatives.king.cutoff.out.id preprocess/full_siblings_rep | cut -f1,2 > preprocess/relatives_toBeExcluded
+tail -n+2 ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.1st_degree_relatives.king.cutoff.out.id | cut -f2 | \
+    grep -vFwf - ${OUTPUT_DIR}/preprocess/full_siblings | cut -f1 | grep -Fwf - ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.psam > ${OUTPUT_DIR}/preprocess/full_siblings_rep
+cat ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.1st_degree_relatives.king.cutoff.out.id ${OUTPUT_DIR}/preprocess/full_siblings_rep | cut -f1,2 > ${OUTPUT_DIR}/preprocess/relatives_toBeExcluded
 
 # Run filtration
-plink2 --pfile preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2 \
-      --remove preprocess/relatives_toBeExcluded \
+plink2 --pfile ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2 \
+      --remove ${OUTPUT_DIR}/preprocess/relatives_toBeExcluded \
       --hwe $HWE_PVAL 'midp' --geno $GENO_MISS --mind $GENO_MISS --maf $MAF --autosome \
-      --real-ref-alleles --make-pgen --output-chr 'chrM' --out filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered
+      --real-ref-alleles --make-pgen --output-chr 'chrM' --out ${OUTPUT_DIR}/filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered
 
 #--remove: 560 samples remaining.
 #560 samples (285 females, 275 males; 560 founders) remaining after main
@@ -390,19 +403,19 @@ plink2 --pfile preprocess/USTA_Diversity_Study.remap.refAlleles.dedup.plink2 \
 # 57829 variants remaining after main filters.
 
 ## Check final genotyping rate
-plink2 --pfile filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered --genotyping-rate \
-       --out filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered.genotyping_rate ## Total (hardcall) genotyping rate is 0.997906.
+plink2 --pfile ${OUTPUT_DIR}/filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered --genotyping-rate \
+       --out ${OUTPUT_DIR}/filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered.genotyping_rate ## Total (hardcall) genotyping rate is 0.997906.
 
 ## Convert back to PLINK1 binary format for compatibility with other tools
-pl1_filtered="filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered"
-plink2 --pfile filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered \
+pl1_filtered="${OUTPUT_DIR}/filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered"
+plink2 --pfile ${OUTPUT_DIR}/filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered \
       --real-ref-alleles --make-bed --output-chr 'chrM' --out $pl1_filtered
 
 ##########################################
 ## Convert to VCF format
-plink2 --pfile filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered \
-      --real-ref-alleles --export vcf id-paste=iid --output-chr 'chrM' --out filtered/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered
-vcf_filtered="filtered/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.vcf"
+plink2 --pfile ${OUTPUT_DIR}/filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered \
+      --real-ref-alleles --export vcf id-paste=iid --output-chr 'chrM' --out ${OUTPUT_DIR}/filtered/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered
+vcf_filtered="${OUTPUT_DIR}/filtered/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.vcf"
 
 
 # check ref alleles and positions of the VCFs
@@ -441,24 +454,24 @@ plink2 --vcf $vcf_filtered.norm.phased.vcf.gz --chr-set 31 no-y no-xy no-mt --al
 
 ##########################################
 ## LD pruning to get independent variants for diversity calculations (& and output as PLINK1 binary format)
-mkdir -p LD_pruned
+mkdir -p ${OUTPUT_DIR}/LD_pruned
 plink2 --vcf $vcf_filtered.norm.phased.vcf.gz --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
        --indep-pairwise ${LD_WINDOW_KB}kb $LD_R2 \
-       --real-ref-alleles --output-chr 'chrM' --out LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.norm.phased.LD_lst ## 12147/57829 variants removed
+       --real-ref-alleles --output-chr 'chrM' --out ${OUTPUT_DIR}/LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.norm.phased.LD_lst ## 12147/57829 variants removed
 
-pl1_pruned="LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.norm.phased.LD_prune"
+pl1_pruned="${OUTPUT_DIR}/LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.norm.phased.LD_prune"
 plink2 --vcf $vcf_filtered.norm.phased.vcf.gz --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-       --psam filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered.psam \
-       --extract LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.norm.phased.LD_lst.prune.in \
+       --psam ${OUTPUT_DIR}/filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.filtered.psam \
+       --extract ${OUTPUT_DIR}/LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.norm.phased.LD_lst.prune.in \
        --real-ref-alleles --make-bed --output-chr 'chrM' --out $pl1_pruned ## 45576 variants remaining
 
 
 ## Explore the LD-pruned dataset
 plink2 --bfile $pl1_pruned --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
       --het --missing --freq --hardy 'midp'  \
-      --output-chr 'chrM' --out inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.norm.phased.LD_prune.explore
+      --output-chr 'chrM' --out ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.norm.phased.LD_prune.explore
 
-## check the change in (F) between: inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.norm.phased.LD_prune.explore.het | less ## F (i.e., measurement of inbreeding) decrease after pruning
+## check the change in (F) between: ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink2.explore.het ${OUTPUT_DIR}/inspect/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.norm.phased.LD_prune.explore.het | less ## F (i.e., measurement of inbreeding) decrease after pruning
 
 ## Check final genotyping rate of the LD-pruned dataset
 plink2 --bfile $pl1_pruned --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
@@ -466,9 +479,9 @@ plink2 --bfile $pl1_pruned --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
 
 ## Convert to VCF format
 plink2 --vcf $vcf_filtered.norm.phased.vcf.gz --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-       --extract LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.norm.phased.LD_lst.prune.in \
-       --real-ref-alleles --export vcf id-paste=iid --output-chr 'chrM' --out LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.norm.phased.LD_prune 
-vcf_pruned="LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.norm.phased.LD_prune.vcf"
+       --extract ${OUTPUT_DIR}/LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.norm.phased.LD_lst.prune.in \
+       --real-ref-alleles --export vcf id-paste=iid --output-chr 'chrM' --out ${OUTPUT_DIR}/LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.norm.phased.LD_prune 
+vcf_pruned="${OUTPUT_DIR}/LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.norm.phased.LD_prune.vcf"
 
 # check ref alleles and positions of the VCFs
 grep -v '^##chrSet' $vcf_pruned | grep -E "^#|^chr" | bgzip --output $vcf_pruned.test.gz
@@ -479,104 +492,104 @@ bcftools norm -c ws -f $ref $vcf_pruned.test.gz 1> $vcf_pruned.test.check.vcf 2>
 
 ############## Stats on diversity ##################
 log "Section 5: Diversity statistics"
-mkdir -p divStats
+mkdir -p ${OUTPUT_DIR}/divStats
 
 ##########################################
 ## PCA Assessment
 ##########################################
 ## PCAs are called "loadings" because they represent the weights or coefficients that determine how much each original variable "loads" onto or contributes to a specific PC.
-pca_prefix="divStats/filtered.LD_prune.pca"
+pca_prefix="${OUTPUT_DIR}/divStats/filtered.LD_prune.pca"
 plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
        --real-ref-alleles --autosome --pca 'allele-wts' \
        --output-chr 'chrM' --out "$pca_prefix"
 
-rclone -v copy divStats --include "filtered.LD_prune.pca.eigen*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
+rclone -v copy ${OUTPUT_DIR}/divStats --include "filtered.LD_prune.pca.eigen*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
 Rscript -e 'args=(commandArgs(TRUE));'\
 'val <- read.table(paste(args[1],"eigenval",sep="."));'\
 'val$varPerc <- val$V1/sum(val$V1);'\
 'jpeg(file = args[2]);'\
 'plot( x = seq(1:length(val$varPerc)), y = val$varPerc, type = "o",xlab = "principal Component", ylab = "Variance explained in %");'\
-'dev.off();' "$pca_prefix" "divStats/Var_PCs.jpg"
-rclone -v copy divStats/Var_PCs.jpg "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
+'dev.off();' "$pca_prefix" "${OUTPUT_DIR}/divStats/Var_PCs.jpg"
+rclone -v copy ${OUTPUT_DIR}/divStats/Var_PCs.jpg "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
 # Color samples on the PCA plots by Sex
 awk 'BEGIN{FS=OFS="\t";a["IID"]="sex"}NR==FNR{if($5==1)a[$2]="male";else a[$2]="female";next}{print $0,a[$2]}' $pl1_pruned.fam $pca_prefix.eigenvec > $pca_prefix.eigenvec.wSex
-eigenvec_suffix="wSex"; color_column="sex"; out_png="divStats/pca_plot_sex.png";
+eigenvec_suffix="wSex"; color_column="sex"; out_png="${OUTPUT_DIR}/divStats/pca_plot_sex.png";
 Rscript scripts/pca_plots.R "$pca_prefix" "$eigenvec_suffix" "$color_column" "$out_png" 6 factor
 rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
 # Color samples on the PCA plots by Gait
-awk 'BEGIN{FS=OFS="\t";a["IID"]="Gait"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' preprocess/USTA_Diversity_Study.gait $pca_prefix.eigenvec > $pca_prefix.eigenvec.wGait
-eigenvec_suffix="wGait"; color_column="Gait"; out_png="divStats/pca_plot_Gait.png";
+awk 'BEGIN{FS=OFS="\t";a["IID"]="Gait"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait $pca_prefix.eigenvec > $pca_prefix.eigenvec.wGait
+eigenvec_suffix="wGait"; color_column="Gait"; out_png="${OUTPUT_DIR}/divStats/pca_plot_Gait.png";
 Rscript scripts/pca_plots.R "$pca_prefix" "$eigenvec_suffix" "$color_column" "$out_png" 6 factor
 rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
 # Color samples on the PCA plots by Book Size
-awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' preprocess/USTA_Diversity_Study.bookSize $pca_prefix.eigenvec > $pca_prefix.eigenvec.wBook_Size
-eigenvec_suffix="wBook_Size"; color_column="Book_Size"; out_png="divStats/pca_plot_BookSize.png";
+awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.bookSize $pca_prefix.eigenvec > $pca_prefix.eigenvec.wBook_Size
+eigenvec_suffix="wBook_Size"; color_column="Book_Size"; out_png="${OUTPUT_DIR}/divStats/pca_plot_BookSize.png";
 Rscript scripts/pca_plots.R "$pca_prefix" "$eigenvec_suffix" "$color_column" "$out_png" 6 factor
 rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
 
 ## Identify Trotter samples segregating on PC2
 ## After exlcusion of highly related animal, this subpopulation is segregating on PC4 (I keep the name of file on_PC2 to avoid confusion ) 
-cat $pca_prefix.eigenvec | awk 'BEGIN{FS=OFS="\t"}{if($6>0.1)print $2}' | grep -Fwf - $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv > divStats/Trotters_segregating_on_PC2.csv || true
-rclone -v copy divStats/Trotters_segregating_on_PC2.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
+cat $pca_prefix.eigenvec | awk 'BEGIN{FS=OFS="\t"}{if($6>0.1)print $2}' | grep -Fwf - $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv > ${OUTPUT_DIR}/divStats/Trotters_segregating_on_PC2.csv || true
+rclone -v copy ${OUTPUT_DIR}/divStats/Trotters_segregating_on_PC2.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 ## Identify Pacer samples co-segregating with Trotters on PC1
 ## 10 samples; currently labeled as undefined.  
-cat $pca_prefix.eigenvec | awk 'BEGIN{FS=OFS="\t"}{if($3<0)print $2}' | grep -Fwf - $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv | grep "Pacer" > divStats/Pacers_cosegregating_withTrotters_on_PC1.csv || true
-rclone -v copy divStats/Pacers_cosegregating_withTrotters_on_PC1.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
+cat $pca_prefix.eigenvec | awk 'BEGIN{FS=OFS="\t"}{if($3<0)print $2}' | grep -Fwf - $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv | grep "Pacer" > ${OUTPUT_DIR}/divStats/Pacers_cosegregating_withTrotters_on_PC1.csv || true
+rclone -v copy ${OUTPUT_DIR}/divStats/Pacers_cosegregating_withTrotters_on_PC1.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 ## Identify Trotter samples co-segregating with Pacers on PC1
 ## 8 samples; currently labeled as undefined.  
-cat $pca_prefix.eigenvec | awk 'BEGIN{FS=OFS="\t"}{if($3>0)print $2}' | grep -Fwf - $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv | grep "Trotter" > divStats/Trotters_cosegregating_withPacers_on_PC1.csv || true
-rclone -v copy divStats/Trotters_cosegregating_withPacers_on_PC1.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
+cat $pca_prefix.eigenvec | awk 'BEGIN{FS=OFS="\t"}{if($3>0)print $2}' | grep -Fwf - $docs/USTA_CuratedGait_BookSize_Assignments_with_Sires_and_Dams_CompositeBS.csv | grep "Trotter" > ${OUTPUT_DIR}/divStats/Trotters_cosegregating_withPacers_on_PC1.csv || true
+rclone -v copy ${OUTPUT_DIR}/divStats/Trotters_cosegregating_withPacers_on_PC1.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
 
 ## 2A. PCA (Trotter only)
-pca_prefix_trot="divStats/filtered.LD_prune.Trotter.pca"
+pca_prefix_trot="${OUTPUT_DIR}/divStats/filtered.LD_prune.Trotter.pca"
 plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-       --keep <(grep "Trotter" preprocess/USTA_Diversity_Study.gait) \
+       --keep <(grep "Trotter" ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait) \
        --autosome --pca \
        --output-chr 'chrM' --out "$pca_prefix_trot"
 
-rclone -v copy divStats --include "filtered.LD_prune.Trotter.pca.eigen*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
+rclone -v copy ${OUTPUT_DIR}/divStats --include "filtered.LD_prune.Trotter.pca.eigen*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
 Rscript -e 'args=(commandArgs(TRUE));'\
 'val <- read.table(paste(args[1],"eigenval",sep="."));'\
 'val$varPerc <- val$V1/sum(val$V1);'\
 'jpeg(file = args[2]);'\
 'plot( x = seq(1:length(val$varPerc)), y = val$varPerc, type = "o",xlab = "principal Component", ylab = "Variance explained in %");'\
-'dev.off();' "$pca_prefix_trot" "divStats/Var_PCs.Trotter.jpg"
-rclone -v copy divStats/Var_PCs.Trotter.jpg "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
+'dev.off();' "$pca_prefix_trot" "${OUTPUT_DIR}/divStats/Var_PCs.Trotter.jpg"
+rclone -v copy ${OUTPUT_DIR}/divStats/Var_PCs.Trotter.jpg "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
 # Color samples on the PCA plots by Book Size
-awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' preprocess/USTA_Diversity_Study.bookSize $pca_prefix_trot.eigenvec > $pca_prefix_trot.eigenvec.wBook_Size
-eigenvec_suffix="wBook_Size"; color_column="Book_Size"; out_png="divStats/pca_plot_BookSize.Trotter.png";
+awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.bookSize $pca_prefix_trot.eigenvec > $pca_prefix_trot.eigenvec.wBook_Size
+eigenvec_suffix="wBook_Size"; color_column="Book_Size"; out_png="${OUTPUT_DIR}/divStats/pca_plot_BookSize.Trotter.png";
 Rscript scripts/pca_plots.R "$pca_prefix_trot" "$eigenvec_suffix" "$color_column" "$out_png" 3 factor
 rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
 
 ## 2B. PCA (Pacer only)
-pca_prefix_pace="divStats/filtered.LD_prune.Pacer.pca"
+pca_prefix_pace="${OUTPUT_DIR}/divStats/filtered.LD_prune.Pacer.pca"
 plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-       --keep <(grep "Pacer" preprocess/USTA_Diversity_Study.gait) \
+       --keep <(grep "Pacer" ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait) \
        --autosome --pca \
        --output-chr 'chrM' --out "$pca_prefix_pace"
 
-rclone -v copy divStats --include "filtered.LD_prune.Pacer.pca.eigen*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
+rclone -v copy ${OUTPUT_DIR}/divStats --include "filtered.LD_prune.Pacer.pca.eigen*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
 Rscript -e 'args=(commandArgs(TRUE));'\
 'val <- read.table(paste(args[1],"eigenval",sep="."));'\
 'val$varPerc <- val$V1/sum(val$V1);'\
 'jpeg(file = args[2]);'\
 'plot( x = seq(1:length(val$varPerc)), y = val$varPerc, type = "o",xlab = "principal Component", ylab = "Variance explained in %");'\
-'dev.off();' "$pca_prefix_pace" "divStats/Var_PCs.Pacer.jpg"
-rclone -v copy divStats/Var_PCs.Pacer.jpg "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
+'dev.off();' "$pca_prefix_pace" "${OUTPUT_DIR}/divStats/Var_PCs.Pacer.jpg"
+rclone -v copy ${OUTPUT_DIR}/divStats/Var_PCs.Pacer.jpg "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
 # Color samples on the PCA plots by Book Size
-awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' preprocess/USTA_Diversity_Study.bookSize $pca_prefix_pace.eigenvec > $pca_prefix_pace.eigenvec.wBook_Size
-eigenvec_suffix="wBook_Size"; color_column="Book_Size"; out_png="divStats/pca_plot_BookSize.Pacer.png";
+awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.bookSize $pca_prefix_pace.eigenvec > $pca_prefix_pace.eigenvec.wBook_Size
+eigenvec_suffix="wBook_Size"; color_column="Book_Size"; out_png="${OUTPUT_DIR}/divStats/pca_plot_BookSize.Pacer.png";
 Rscript scripts/pca_plots.R "$pca_prefix_pace" "$eigenvec_suffix" "$color_column" "$out_png" 3 factor
 rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
@@ -607,7 +620,7 @@ awk -v pop="wholePop" 'BEGIN{FS=OFS="\t"} NR==1{next} {sum_Ae+=$NF; sumsq += $NF
 ## Calculate \(A_{e}\) for each SNP per gait subpopulation
 group="gait"
 plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-    --pheno preprocess/USTA_Diversity_Study.$group \
+    --pheno ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.$group \
     --loop-cats 'PHENO1' --freq \
     --out "$pl1_pruned.freq_stats"
 #--loop-cats: Processing category 'Pacer' (271 samples).
@@ -624,7 +637,7 @@ done
 
 ## Calculate \(A_{e}\) for each SNP per book size in each gait subpopulation
 plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-    --pheno preprocess/USTA_Diversity_Study.gait_bookSize \
+    --pheno ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize \
     --loop-cats 'PHENO1' --freq \
     --out "$pl1_pruned.freq_stats"
 #--loop-cats: Processing category 'Pacer_HIGH' (75 samples).
@@ -650,11 +663,11 @@ done
 #Mean_Ae_in_Trotter_HIGH 1.50661 SD_Ae_in_Trotter_HIGH   0.34827
 
 
-Rscript scripts/effAllele_stats.R &> divStats/effAllele_stats.txt
-Rscript scripts/plot_Ae.R
-rclone -v copy divStats/effAllele_stats.txt "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Ae/" --drive-shared-with-me
-rclone -v copy divStats/Figure_Ae_BookSize.tiff "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Ae/" --drive-shared-with-me
-#rclone -v copy divStats/Figure_Ae_BookSize.pdf "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Ae/" --drive-shared-with-me
+Rscript scripts/effAllele_stats.R "${OUTPUT_DIR}" &> ${OUTPUT_DIR}/divStats/effAllele_stats.txt
+Rscript scripts/plot_Ae.R "${OUTPUT_DIR}"
+rclone -v copy ${OUTPUT_DIR}/divStats/effAllele_stats.txt "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Ae/" --drive-shared-with-me
+rclone -v copy ${OUTPUT_DIR}/divStats/Figure_Ae_BookSize.tiff "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Ae/" --drive-shared-with-me
+#rclone -v copy ${OUTPUT_DIR}/divStats/Figure_Ae_BookSize.pdf "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Ae/" --drive-shared-with-me
 
 ##########################################
 ## 2. Fst between subpopulations (genders, gait types, and book sizes)
@@ -664,31 +677,31 @@ rclone -v copy divStats/Figure_Ae_BookSize.tiff "remote_UCDavis_GoogleDr:STR_Imp
 ## Effects of marker type and filtering criteria on QST-FST comparisons: https://pmc.ncbi.nlm.nih.gov/articles/PMC6894560/
 for group in sex gait bookSize; do
     plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-        --pheno preprocess/USTA_Diversity_Study.$group \
+        --pheno ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.$group \
         --fst 'PHENO1' 'blocksize=2000' \
-        --output-chr 'chrM' --out divStats/filtered.LD_prune.fst_$group
+        --output-chr 'chrM' --out ${OUTPUT_DIR}/divStats/filtered.LD_prune.fst_$group
 done
 
-find divStats/filtered.LD_prune.fst_*.summary -maxdepth 1 -type f | grep -v "\.x\." | xargs cat > divStats/autosomal.fst.summary
-rclone -v copy divStats/autosomal.fst.summary "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
+find ${OUTPUT_DIR}/divStats/filtered.LD_prune.fst_*.summary -maxdepth 1 -type f | grep -v "\.x\." | xargs cat > ${OUTPUT_DIR}/divStats/autosomal.fst.summary
+rclone -v copy ${OUTPUT_DIR}/divStats/autosomal.fst.summary "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
 
 group="bookSize"
 plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-    --keep <(grep "Trotter" preprocess/USTA_Diversity_Study.gait) \
-    --pheno preprocess/USTA_Diversity_Study.$group \
+    --keep <(grep "Trotter" ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait) \
+    --pheno ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.$group \
     --fst 'PHENO1' 'blocksize=2000' \
-    --output-chr 'chrM' --out divStats/filtered.LD_prune.fst_$group.Trotter
-rclone -v copy divStats/filtered.LD_prune.fst_bookSize.Trotter.fst.summary "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
+    --output-chr 'chrM' --out ${OUTPUT_DIR}/divStats/filtered.LD_prune.fst_$group.Trotter
+rclone -v copy ${OUTPUT_DIR}/divStats/filtered.LD_prune.fst_bookSize.Trotter.fst.summary "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
 
 plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-    --keep <(grep "Pacer" preprocess/USTA_Diversity_Study.gait) \
-    --pheno preprocess/USTA_Diversity_Study.$group \
+    --keep <(grep "Pacer" ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait) \
+    --pheno ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.$group \
     --fst 'PHENO1' 'blocksize=2000' \
-    --output-chr 'chrM' --out divStats/filtered.LD_prune.fst_$group.Pacer
-rclone -v copy divStats/filtered.LD_prune.fst_bookSize.Pacer.fst.summary "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
+    --output-chr 'chrM' --out ${OUTPUT_DIR}/divStats/filtered.LD_prune.fst_$group.Pacer
+rclone -v copy ${OUTPUT_DIR}/divStats/filtered.LD_prune.fst_bookSize.Pacer.fst.summary "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
 
-Rscript scripts/fst_stats.R &> divStats/fst_stats.txt
-rclone -v copy divStats/fst_stats.txt "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
+Rscript scripts/fst_stats.R "${OUTPUT_DIR}" &> ${OUTPUT_DIR}/divStats/fst_stats.txt
+rclone -v copy ${OUTPUT_DIR}/divStats/fst_stats.txt "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
 
 ##########################################
 ## 3. Expected and observed heterozygosity and inbreeding coefficient
@@ -697,47 +710,47 @@ rclone -v copy divStats/fst_stats.txt "remote_UCDavis_GoogleDr:STR_Imputation_20
 ## A higher COI means more predictability of traits but also a greater risk of genetic health problems due to inbreeding depression
 plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
     --het 'cols=fid,hom,het,nobs,f' \
-    --out divStats/filtered.LD_prune.het_stats
+    --out ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats
 awk -v size=0.02 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($8/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
-                END { for(i=bmin;i<=bmax;++i){if(i==0) print -1*size,size,a[i]/1;else if(i<0) print (i-1)*size,i*size,a[i]/1;else print i*size,(i+1)*size,a[i]/1 }}'  <(tail -n+2 divStats/filtered.LD_prune.het_stats.het) > divStats/filtered.LD_prune.het_stats.het.histo
+                END { for(i=bmin;i<=bmax;++i){if(i==0) print -1*size,size,a[i]/1;else if(i<0) print (i-1)*size,i*size,a[i]/1;else print i*size,(i+1)*size,a[i]/1 }}'  <(tail -n+2 ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het) > ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.histo
 
 ## generate a summary table of heterozygosity and inbreeding coefficient in the two subpopulations and the whole cohort
 awk 'BEGIN{FS=OFS="\t";a["IID"]="Gait"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' \
-     preprocess/USTA_Diversity_Study.gait divStats/filtered.LD_prune.het_stats.het > divStats/filtered.LD_prune.het_stats.het.wGait
+     ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het > ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait
 
-INPUT_HET="divStats/filtered.LD_prune.het_stats.het.wGait"
-OUTPUT_FILE="divStats/filtered.LD_prune.het_stats.het.wGait.sumStats.csv"
+INPUT_HET="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait"
+OUTPUT_FILE="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait.sumStats.csv"
 python scripts/summary_het.py -i "$INPUT_HET" -o "$OUTPUT_FILE"
 
 ## generate a summary table of heterozygosity and inbreeding coefficient in the three book size in the two subpopulations and the whole cohort
 awk 'BEGIN{FS=OFS="\t";a["IID"]="Gait"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' \
-     preprocess/USTA_Diversity_Study.gait_bookSize divStats/filtered.LD_prune.het_stats.het > divStats/filtered.LD_prune.het_stats.het.wGait_bookSize
+     ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het > ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait_bookSize
 
-INPUT_HET="divStats/filtered.LD_prune.het_stats.het.wGait_bookSize"
-OUTPUT_FILE="divStats/filtered.LD_prune.het_stats.het.wGait_bookSize.sumStats.csv"
+INPUT_HET="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait_bookSize"
+OUTPUT_FILE="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait_bookSize.sumStats.csv"
 python scripts/summary_het.py -i "$INPUT_HET" -o "$OUTPUT_FILE"
 
-rclone -v copy divStats --include "filtered.LD_prune.het_stats.het*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/het_and_COI/" --drive-shared-with-me
+rclone -v copy ${OUTPUT_DIR}/divStats --include "filtered.LD_prune.het_stats.het*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/het_and_COI/" --drive-shared-with-me
 
 ## PCA: Color samples on the PCA plots by COI
 # Whole population
-pca_prefix="divStats/filtered.LD_prune.pca"
-awk 'BEGIN{FS=OFS="\t";a["IID"]="COI"}NR==FNR{a[$2]=$8;next}{print $0,a[$2]}' <(tail -n+2 divStats/filtered.LD_prune.het_stats.het) $pca_prefix.eigenvec > $pca_prefix.eigenvec.wCOI
-eigenvec_suffix="wCOI"; color_column="COI"; out_png="divStats/pca_plot_inbreeding.png";
+pca_prefix="${OUTPUT_DIR}/divStats/filtered.LD_prune.pca"
+awk 'BEGIN{FS=OFS="\t";a["IID"]="COI"}NR==FNR{a[$2]=$8;next}{print $0,a[$2]}' <(tail -n+2 ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het) $pca_prefix.eigenvec > $pca_prefix.eigenvec.wCOI
+eigenvec_suffix="wCOI"; color_column="COI"; out_png="${OUTPUT_DIR}/divStats/pca_plot_inbreeding.png";
 Rscript scripts/pca_plots.R "$pca_prefix" "$eigenvec_suffix" "$color_column" "$out_png" 6 numeric
 rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
 # Trotters only
-pca_prefix_trot="divStats/filtered.LD_prune.Trotter.pca"
-awk 'BEGIN{FS=OFS="\t";a["IID"]="COI"}NR==FNR{a[$2]=$8;next}{print $0,a[$2]}' <(tail -n+2 divStats/filtered.LD_prune.het_stats.het) $pca_prefix_trot.eigenvec > $pca_prefix_trot.eigenvec.wCOI
-eigenvec_suffix="wCOI"; color_column="COI"; out_png="divStats/pca_plot_inbreeding.Trotter.png";
+pca_prefix_trot="${OUTPUT_DIR}/divStats/filtered.LD_prune.Trotter.pca"
+awk 'BEGIN{FS=OFS="\t";a["IID"]="COI"}NR==FNR{a[$2]=$8;next}{print $0,a[$2]}' <(tail -n+2 ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het) $pca_prefix_trot.eigenvec > $pca_prefix_trot.eigenvec.wCOI
+eigenvec_suffix="wCOI"; color_column="COI"; out_png="${OUTPUT_DIR}/divStats/pca_plot_inbreeding.Trotter.png";
 Rscript scripts/pca_plots.R "$pca_prefix_trot" "$eigenvec_suffix" "$color_column" "$out_png" 3 numeric
 rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
 # Pacers only
-pca_prefix_pace="divStats/filtered.LD_prune.Pacer.pca"
-awk 'BEGIN{FS=OFS="\t";a["IID"]="COI"}NR==FNR{a[$2]=$8;next}{print $0,a[$2]}' <(tail -n+2 divStats/filtered.LD_prune.het_stats.het) $pca_prefix_pace.eigenvec > $pca_prefix_pace.eigenvec.wCOI
-eigenvec_suffix="wCOI"; color_column="COI"; out_png="divStats/pca_plot_inbreeding.Pacer.png";
+pca_prefix_pace="${OUTPUT_DIR}/divStats/filtered.LD_prune.Pacer.pca"
+awk 'BEGIN{FS=OFS="\t";a["IID"]="COI"}NR==FNR{a[$2]=$8;next}{print $0,a[$2]}' <(tail -n+2 ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het) $pca_prefix_pace.eigenvec > $pca_prefix_pace.eigenvec.wCOI
+eigenvec_suffix="wCOI"; color_column="COI"; out_png="${OUTPUT_DIR}/divStats/pca_plot_inbreeding.Pacer.png";
 Rscript scripts/pca_plots.R "$pca_prefix_pace" "$eigenvec_suffix" "$color_column" "$out_png" 3 numeric
 rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
@@ -762,9 +775,9 @@ case="Trotter"
 ## Due to how the scanning algorithm works, it is possible for a reported run of homozygosity to be adjacent to a few unincluded homozygous variants. This is generally harmless, but if you wish to extend the ROH to include them, use the 'extend' modifier. (Note that the --homozyg-density bound can prevent extension, and --homozyg-gap affects which variants are considered adjacent.)
 
 plink --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-        --make-pheno preprocess/USTA_Diversity_Study.$group $case \
+        --make-pheno ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.$group $case \
         --homozyg 'extend' \
-        --output-chr 'chrM' --out divStats/filtered.LD_prune.roh_$group
+        --output-chr 'chrM' --out ${OUTPUT_DIR}/divStats/filtered.LD_prune.roh_$group
 
 
 ## Outputs of --homozyg include: 
@@ -783,74 +796,74 @@ awk 'NR > 1{ sum4 += $4; sum5 += $5; sum6 += $6 } END \
     { count = NR - 1; printf "Average Number of runs of homozygosity (NSEG) : %.2f\n \
     Average of the total length of runs (kb) across all samples: %.2f\n \
     Average of the average length of runs (KBAVG) across all samples: %.2f\n", \
-    sum4/count, sum5/count, sum6/count }' divStats/filtered.LD_prune.roh_$group.hom.indiv
+    sum4/count, sum5/count, sum6/count }' ${OUTPUT_DIR}/divStats/filtered.LD_prune.roh_$group.hom.indiv
 ##Average Number of runs of homozygosity (NSEG) : 15.63 
 ##Average of the total length of runs (kb) across all samples: 164,427.23
 ##Average of the average length of runs (KBAVG) across all samples: 10,439.76
 
 
 ## Rscript that plots the correlation between "KB" and "KBAVG" from .hom.indiv and the difference O(HET) and E(HET), and F columns from .het
-roh_indiv="divStats/filtered.LD_prune.roh_$group.hom.indiv" ## to read KB and KBAVG
-het_stats="divStats/filtered.LD_prune.het_stats.het"        ## to read O(HET), E(HET), and F
-out_prefix="divStats/filtered.LD_prune.roh_$group.hom"
-Rscript scripts/correlation_plot_multiway.R $roh_indiv $het_stats $out_prefix
+roh_indiv="${OUTPUT_DIR}/divStats/filtered.LD_prune.roh_$group.hom.indiv" ## to read KB and KBAVG
+het_stats="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het"        ## to read O(HET), E(HET), and F
+out_prefix="${OUTPUT_DIR}/divStats/filtered.LD_prune.roh_$group.hom"
+Rscript scripts/correlation_plot.R --mode basic $roh_indiv $het_stats $out_prefix
 rclone -v copy $out_prefix.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/plink_pruned/" --drive-shared-with-me
 
 ##########################################
 ## 4B. ROH using Plink (Filtered dataset without LD pruning)
 ##########################################
 plink --bfile "$pl1_filtered" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-        --make-pheno preprocess/USTA_Diversity_Study.$group $case \
+        --make-pheno ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.$group $case \
         --homozyg 'extend' \
-        --output-chr 'chrM' --out divStats/filtered.not_pruned.roh_$group
+        --output-chr 'chrM' --out ${OUTPUT_DIR}/divStats/filtered.not_pruned.roh_$group
 
 awk 'NR > 1{ sum4 += $4; sum5 += $5; sum6 += $6 } END \
     { count = NR - 1; printf "Average Number of runs of homozygosity (NSEG) : %.2f\n \
     Average of the total length of runs (kb) across all samples: %.2f\n \
     Average of the average length of runs (KBAVG) across all samples: %.2f\n", \
-    sum4/count, sum5/count, sum6/count }' divStats/filtered.not_pruned.roh_$group.hom.indiv
+    sum4/count, sum5/count, sum6/count }' ${OUTPUT_DIR}/divStats/filtered.not_pruned.roh_$group.hom.indiv
 ##Average Number of runs of homozygosity (NSEG) : 33.35
 ##Average of the total length of runs (kb) across all samples: 345,017.70
 ##Average of the average length of runs (KBAVG) across all samples: 10,305.44
 
 
 ## Rscript that plots the correlation between  KB and KBAVG from .hom.indiv and the difference O(HET) and E(HET), and F columns from .het
-roh_indiv="divStats/filtered.not_pruned.roh_$group.hom.indiv" ## to read KB and KBAVG
-het_stats="divStats/filtered.LD_prune.het_stats.het"        ## to read O(HET), E(HET), and F
-out_prefix="divStats/filtered.not_pruned.roh_$group.hom"
-Rscript scripts/correlation_plot_multiway.R $roh_indiv $het_stats $out_prefix
-rclone -v copy $out_prefix.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/plink_filtered/" --drive-shared-with-me
+roh_indiv="${OUTPUT_DIR}/divStats/filtered.not_pruned.roh_$group.hom.indiv" ## to read KB and KBAVG
+het_stats="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het"        ## to read O(HET), E(HET), and F
+out_prefix="${OUTPUT_DIR}/divStats/filtered.not_pruned.roh_$group.hom"
+Rscript scripts/correlation_plot.R --mode basic $roh_indiv $het_stats $out_prefix
+rclone -v copy $out_prefix.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/plink_${OUTPUT_DIR}/filtered/" --drive-shared-with-me
 
 ##########################################
 ## 4C. ROH using Plink (Filtered dataset without LD pruning (with group option))
 ##########################################
 plink --bfile "$pl1_filtered" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-        --make-pheno preprocess/USTA_Diversity_Study.$group $case \
+        --make-pheno ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.$group $case \
         --homozyg group 'extend' \
         --homozyg-window-snp 20 \
-        --output-chr 'chrM' --out divStats/filtered.not_pruned.group_roh_$group
+        --output-chr 'chrM' --out ${OUTPUT_DIR}/divStats/filtered.not_pruned.group_roh_$group
 
 awk 'NR > 1{ sum4 += $4; sum5 += $5; sum6 += $6 } END \
     { count = NR - 1; printf "Average Number of runs of homozygosity (NSEG) : %.2f\n \
     Average of the total length of runs (kb) across all samples: %.2f\n \
     Average of the average length of runs (KBAVG) across all samples: %.2f\n", \
-    sum4/count, sum5/count, sum6/count }' divStats/filtered.not_pruned.group_roh_$group.hom.indiv
+    sum4/count, sum5/count, sum6/count }' ${OUTPUT_DIR}/divStats/filtered.not_pruned.group_roh_$group.hom.indiv
 ##Average Number of runs of homozygosity (NSEG) : 35.46
 ##Average of the total length of runs (kb) across all samples: 364,115.99
 ##Average of the average length of runs (KBAVG) across all samples: 10,211.80
 
 ## Rscript that plots the correlation between  KB and KBAVG from .hom.indiv and the difference O(HET) and E(HET), and F columns from .het
-roh_indiv="divStats/filtered.not_pruned.group_roh_$group.hom.indiv" ## to read KB and KBAVG
-het_stats="divStats/filtered.LD_prune.het_stats.het"        ## to read O(HET), E(HET), and F
-out_prefix="divStats/filtered.not_pruned.group_roh_$group.hom"
-Rscript scripts/correlation_plot_multiway.R $roh_indiv $het_stats $out_prefix
+roh_indiv="${OUTPUT_DIR}/divStats/filtered.not_pruned.group_roh_$group.hom.indiv" ## to read KB and KBAVG
+het_stats="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het"        ## to read O(HET), E(HET), and F
+out_prefix="${OUTPUT_DIR}/divStats/filtered.not_pruned.group_roh_$group.hom"
+Rscript scripts/correlation_plot.R --mode basic $roh_indiv $het_stats $out_prefix
 rclone -v copy $out_prefix.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/plink_filtered_gp/" --drive-shared-with-me
 
 ############################################
 ## 4D. Studying ROH using Howard et al. (2016) approach -- This was for testing only and is not currently in use
 ############################################
-mkdir -p $work_dir/rep_ROHRM
-rohrm_dir="$work_dir/rep_ROHRM"
+mkdir -p $work_dir/${OUTPUT_DIR}/rep_ROHRM
+rohrm_dir="$work_dir/${OUTPUT_DIR}/rep_ROHRM"
 
 ## ROH Analysis with Sub-populations and Phenotypes
 ## Having a headerless tab-separated file with 3 columns: The 2nd column has subject ids matching the VCF and the 3rd column has the a binary phenotype, let us do the following:
@@ -862,7 +875,7 @@ rohrm_dir="$work_dir/rep_ROHRM"
 ## 5. Calc the average (±SD) proportion of the genome in a ROH for the whole population and each sub-population.
 
 roh_mb_cutoff=1.0  # in Megabases (Mb)
-phenotypes="preprocess/USTA_Diversity_Study.gait"
+phenotypes="${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait"
 python $scripts/ROH_analysis.py $vcf_filtered.norm.phased.vcf.gz $phenotypes $roh_mb_cutoff "$rohrm_dir" > $rohrm_dir/ROH_analysis.$roh_mb_cutoff.log
 
 rclone -v copy $rohrm_dir/ROH_Frequency_Plot.$roh_mb_cutoff.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
@@ -913,42 +926,42 @@ rclone -v copy $rohrm_dir/Filtered_ROH_Subpop_Stats.csv "remote_UCDavis_GoogleDr
 # 4E. ROH using bcftools/roh (Filtered dataset without LD pruning) -- This is the final approved approach
 ##########################################
 ## Run bcftools roh
-bcftools roh -G30 --estimate-AF - $vcf_filtered.norm.phased.vcf.gz -o divStats/roh_out.txt
+bcftools roh -G30 --estimate-AF - $vcf_filtered.norm.phased.vcf.gz -o ${OUTPUT_DIR}/divStats/roh_out.txt
 ##Number of target samples: 560
 ##Number of --estimate-AF samples: 560
 ##Number of sites in the buffer/overlap: unlimited
 ##Number of lines total/processed: 57829/57829 (old: 58106/58106)
-##Number of lines filtered/no AF/no alt/multiallelic/dup: 0/0/0/0/0
+##Number of lines ${OUTPUT_DIR}/filtered/no AF/no alt/multiallelic/dup: 0/0/0/0/0
 
-grep -E "^RG|^#" divStats/roh_out.txt > divStats/roh_out_RG.txt
+grep -E "^RG|^#" ${OUTPUT_DIR}/divStats/roh_out.txt > ${OUTPUT_DIR}/divStats/roh_out_RG.txt
 ## Summary stats by RG
-awk 'BEGIN{print "IID\tNSEG\tKB\tKBAVG"} $1=="RG"{n[$2]++; sum[$2]+=$6} END{for (s in n) printf "%s\t%d\t%.2f\t%.2f\n", s, n[s], sum[s]/1000, (sum[s]/1000)/n[s]}' divStats/roh_out_RG.txt > divStats/roh_summary_by_RG.txt
+awk 'BEGIN{print "IID\tNSEG\tKB\tKBAVG"} $1=="RG"{n[$2]++; sum[$2]+=$6} END{for (s in n) printf "%s\t%d\t%.2f\t%.2f\n", s, n[s], sum[s]/1000, (sum[s]/1000)/n[s]}' ${OUTPUT_DIR}/divStats/roh_out_RG.txt > ${OUTPUT_DIR}/divStats/roh_summary_by_RG.txt
 awk 'NR > 1{ sum2 += $2; sum3 += $3; sum4 += $4 } END \
     { count = NR - 1; printf "Average Number of runs of homozygosity (NSEG) : %.2f\n \
     Average of the total length of runs (kb) across all samples: %.2f\n \
     Average of the average length of runs (KBAVG) across all samples: %.2f\n", \
-    sum2/count, sum3/count, sum4/count }' divStats/roh_summary_by_RG.txt
+    sum2/count, sum3/count, sum4/count }' ${OUTPUT_DIR}/divStats/roh_summary_by_RG.txt
 ##Average Number of runs of homozygosity (NSEG) : 86.53
 ##Average of the total length of runs (kb) across all samples: 456,016.51
 ##Average of the average length of runs (KBAVG) across all samples: 5,256.67
 
 ## filtration to match the PLINK quality suggestions 
 #Minimum ROH length (--homozyg-kb) 1000 kb
-awk '/^#/ || $6 >= 1000000' divStats/roh_out_RG.txt > divStats/roh.L1.txt
+awk '/^#/ || $6 >= 1000000' ${OUTPUT_DIR}/divStats/roh_out_RG.txt > ${OUTPUT_DIR}/divStats/roh.L1.txt
 #Minimum number of SNPs in ROH (--homozyg-snp) 50
-awk '/^#/ || $7 >= 50' divStats/roh.L1.txt > divStats/roh.L2.txt
+awk '/^#/ || $7 >= 50' ${OUTPUT_DIR}/divStats/roh.L1.txt > ${OUTPUT_DIR}/divStats/roh.L2.txt
 #Quality scores
-awk -v size=2 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($8/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(grep -v "^#" divStats/roh.L2.txt) > divStats/roh.L2.histo 
-awk '/^#/ || $8 >= 20' divStats/roh.L2.txt > divStats/roh.L3.txt
+awk -v size=2 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($8/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(grep -v "^#" ${OUTPUT_DIR}/divStats/roh.L2.txt) > ${OUTPUT_DIR}/divStats/roh.L2.histo 
+awk '/^#/ || $8 >= 20' ${OUTPUT_DIR}/divStats/roh.L2.txt > ${OUTPUT_DIR}/divStats/roh.L3.txt
 
 ## Summary stats by RG after QC filtration && Stratify the file by the gait type
-## The stats will be recalculated again later with Froh using "divStats/roh_summary_by_RG_L3.txt"
-awk 'BEGIN{print "IID\tNSEG\tKB\tKBAVG"} $1=="RG"{n[$2]++; sum[$2]+=$6} END{for (s in n) printf "%s\t%d\t%.2f\t%.2f\n", s, n[s], sum[s]/1000, (sum[s]/1000)/n[s]}' divStats/roh.L3.txt > divStats/roh_summary_by_RG_L3.txt
-awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {if(gait[$1])print $0,gait[$1];else print $0,"undefined";}' preprocess/USTA_Diversity_Study.gait divStats/roh_summary_by_RG_L3.txt > divStats/roh.L3_gait.txt
-INPUT_ROH="divStats/roh.L3_gait.txt"
-OUTPUT_FILE="divStats/roh.L3_gait.sumStats.csv"
+## The stats will be recalculated again later with Froh using "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.txt"
+awk 'BEGIN{print "IID\tNSEG\tKB\tKBAVG"} $1=="RG"{n[$2]++; sum[$2]+=$6} END{for (s in n) printf "%s\t%d\t%.2f\t%.2f\n", s, n[s], sum[s]/1000, (sum[s]/1000)/n[s]}' ${OUTPUT_DIR}/divStats/roh.L3.txt > ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.txt
+awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {if(gait[$1])print $0,gait[$1];else print $0,"undefined";}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.txt > ${OUTPUT_DIR}/divStats/roh.L3_gait.txt
+INPUT_ROH="${OUTPUT_DIR}/divStats/roh.L3_gait.txt"
+OUTPUT_FILE="${OUTPUT_DIR}/divStats/roh.L3_gait.sumStats.csv"
 python scripts/summary_roh.py -i "$INPUT_ROH" -o "$OUTPUT_FILE"
-rclone -v copy divStats/roh.L3_gait.sumStats.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
+rclone -v copy ${OUTPUT_DIR}/divStats/roh.L3_gait.sumStats.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
 #Subgroup,          N,      NSEG,           KB,                         KBAVG
 #Whole Population,  560,    54.58 +/- 9.43, 413086.61 +/- 103171.97,    7533.22 +/- 1210.63
 #Pacer,             271,    50.34 +/- 7.11, 379860.14 +/- 81886.48,     7535.88 +/- 1224.94
@@ -958,16 +971,16 @@ rclone -v copy divStats/roh.L3_gait.sumStats.csv "remote_UCDavis_GoogleDr:STR_Im
 
 ## Rscript that plots the correlation between KB and KBAVG from .hom.indiv and the difference O(HET) and E(HET), and F columns from .het
 ## Similar analysis will be done later after calculation of related matrices
-roh_indiv="divStats/roh_summary_by_RG_L3.txt" ## to read KB and KBAVG
-het_stats="divStats/filtered.LD_prune.het_stats.het"        ## to read O(HET), E(HET), and F
-out_prefix="divStats/filtered.not_pruned.roh_summary_by_RG_L3"
-Rscript scripts/correlation_plot_multiway.R $roh_indiv $het_stats $out_prefix
+roh_indiv="${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.txt" ## to read KB and KBAVG
+het_stats="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het"        ## to read O(HET), E(HET), and F
+out_prefix="${OUTPUT_DIR}/divStats/filtered.not_pruned.roh_summary_by_RG_L3"
+Rscript scripts/correlation_plot.R --mode basic $roh_indiv $het_stats $out_prefix
 rclone -v copy $out_prefix.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
 
 ## A per-base consensus ROH where ≥25% of samples are in ROH filtered by minimum size 500 kb and stratified by gait type
 ## With and without applying a smoothing function to the per-base coverage data to reduce noise before identifying consensus ROH regions
-#roh_RG=divStats/roh_out_RG
-roh_RG=divStats/roh.L3
+#roh_RG=${OUTPUT_DIR}/divStats/roh_out_RG
+roh_RG=${OUTPUT_DIR}/divStats/roh.L3
 # 1. Convert RG output → BED format
 awk 'BEGIN{OFS="\t"} $1=="RG" {print $3, $4-1, $5, $2}' "${roh_RG}.txt" > "${roh_RG}.bed"
 # 2. Ensure ROHs from the same sample do not double-count
@@ -977,13 +990,13 @@ done | sort -k1,1 -k2,2n > "${roh_RG}.merged_per_sample.wholePop.bed"
 
 # subset the bed file for each subpopulation
 for rg in "Trotter" "Pacer" "Trotter_LOW" "Trotter_MEDIUM" "Trotter_HIGH" "Pacer_LOW" "Pacer_MEDIUM" "Pacer_HIGH"; do 
-    grep "$rg" preprocess/USTA_Diversity_Study.gait_bookSize | cut -f2 | grep -f - "${roh_RG}.merged_per_sample.wholePop.bed" > "${roh_RG}.merged_per_sample.${rg}.bed"
+    grep "$rg" ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize | cut -f2 | grep -f - "${roh_RG}.merged_per_sample.wholePop.bed" > "${roh_RG}.merged_per_sample.${rg}.bed"
 done
 
 # 3. Calculate per-base ROH frequency (i.e., how many samples are in ROH at each base position)
-awk '$1 ~ /^[0-9]+$/' $reference_fai | awk 'BEGIN{OFS="\t"}{print "chr"$1,$2}' > divStats/autosomes.genome
+awk '$1 ~ /^[0-9]+$/' $reference_fai | awk 'BEGIN{OFS="\t"}{print "chr"$1,$2}' > ${OUTPUT_DIR}/divStats/autosomes.genome
 for rg in "wholePop" "Trotter" "Pacer" "Trotter_LOW" "Trotter_MEDIUM" "Trotter_HIGH" "Pacer_LOW" "Pacer_MEDIUM" "Pacer_HIGH"; do 
-    bedtools genomecov -i "${roh_RG}.merged_per_sample.${rg}.bed" -g divStats/autosomes.genome -bg > "${roh_RG}.per_base_coverage.${rg}.bed"
+    bedtools genomecov -i "${roh_RG}.merged_per_sample.${rg}.bed" -g ${OUTPUT_DIR}/divStats/autosomes.genome -bg > "${roh_RG}.per_base_coverage.${rg}.bed"
     awk -v size=5 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($4/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
                       END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  "${roh_RG}.per_base_coverage.${rg}.bed" > "${roh_RG}.per_base_coverage.${rg}.histo"
     # upload bed files
@@ -1046,7 +1059,7 @@ grep -A3 "AFTER SMOOTHING" ${roh_RG}.consensus_${pct}pct.summary.txt
 
 ## intersect ROH regions of each sample aganist the consensus ROH regions (in each "rg")
 ## Output: the census length and percentage in each sample (file for each "rg")
-roh_RG="divStats/roh.L3"
+roh_RG="${OUTPUT_DIR}/divStats/roh.L3"
 for rg in "wholePop" "Trotter" "Pacer" "Trotter_LOW" "Trotter_MEDIUM" "Trotter_HIGH" "Pacer_LOW" "Pacer_MEDIUM" "Pacer_HIGH"; do
     consensus_bed=${roh_RG}.consensus_${pct}pct.merged.${rg}.smoothed.bed
     consensus_size=$(awk 'BEGIN{sum=0} {sum+=($3-$2)} END {print sum}' ${consensus_bed})
@@ -1085,49 +1098,49 @@ aut_len=$(sort -k1,1 -k2,2n "$pl1_filtered".snp_pos.txt | \
         awk '{if ($1 == prev_chr) { gap = $2 - prev_pos; \
               if(gap > 0) {if (gap > 1000000) gap = 1000000; total += gap; }}\
               prev_chr=$1; prev_pos=$2} END {print total}') ## 2,261,547,402
-echo $aut_len > divStats/effective_autosomal_genome_length.txt
+echo $aut_len > ${OUTPUT_DIR}/divStats/effective_autosomal_genome_length.txt
 
-awk -v aut_len=$aut_len 'BEGIN{FS=OFS="\t";}NR==1{print $0,"F_ROH";next} {print $0, ($3*1000)/aut_len}' divStats/roh_summary_by_RG_L3.txt > divStats/roh_summary_by_RG_L3_Froh.txt
-awk -v size=0.02 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($5/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(tail -n+2 divStats/roh_summary_by_RG_L3_Froh.txt) > divStats/roh_summary_by_RG_L3_Froh.histo 
-rclone -v copy divStats  --drive-shared-with-me --include "roh_summary_by_RG_L3_Froh.*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/"
+awk -v aut_len=$aut_len 'BEGIN{FS=OFS="\t";}NR==1{print $0,"F_ROH";next} {print $0, ($3*1000)/aut_len}' ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.txt > ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.txt
+awk -v size=0.02 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($5/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(tail -n+2 ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.txt) > ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.histo 
+rclone -v copy ${OUTPUT_DIR}/divStats  --drive-shared-with-me --include "roh_summary_by_RG_L3_Froh.*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/"
 
-awk '{if($5>0.3)print $0}' divStats/roh_summary_by_RG_L3_Froh.txt | tr '\t' ',' > divStats/roh_high.csv
-rclone -v copy divStats/roh_high.csv  --drive-shared-with-me "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/"
+awk '{if($5>0.3)print $0}' ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.txt | tr '\t' ',' > ${OUTPUT_DIR}/divStats/roh_high.csv
+rclone -v copy ${OUTPUT_DIR}/divStats/roh_high.csv  --drive-shared-with-me "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/"
 
 ## Summary stats of all ROH metrics Stratified by the gait type
-awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {if(gait[$1])print $0,gait[$1];else print $0,"undefined";}' preprocess/USTA_Diversity_Study.gait divStats/roh_summary_by_RG_L3_Froh.txt > divStats/roh.L3_Froh_gait.txt
-INPUT_ROH="divStats/roh.L3_Froh_gait.txt"
-OUTPUT_FILE="divStats/roh.L3_Froh_gait.sumStats.csv"
-python scripts/summary_roh_v2.py -i "$INPUT_ROH" -o "$OUTPUT_FILE"
-# Summary saved to divStats/roh.L3_Froh_gait.sumStats.csv
+awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {if(gait[$1])print $0,gait[$1];else print $0,"undefined";}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.txt > ${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.txt
+INPUT_ROH="${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.txt"
+OUTPUT_FILE="${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.sumStats.csv"
+python scripts/summary_roh.py -i "$INPUT_ROH" -o "$OUTPUT_FILE" -n 4
+# Summary saved to ${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.sumStats.csv
 
 ## Summary stats of all ROH metrics Stratified by book size for each gait type
-awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {if(gait[$1])print $0,gait[$1];else print $0,"undefined";}' preprocess/USTA_Diversity_Study.gait_bookSize divStats/roh_summary_by_RG_L3_Froh.txt > divStats/roh.L3_Froh_gait_bookSize.txt
-INPUT_ROH="divStats/roh.L3_Froh_gait_bookSize.txt"
-OUTPUT_FILE="divStats/roh.L3_Froh_gait_bookSize.sumStats.csv"
-python scripts/summary_roh_v2.py -i "$INPUT_ROH" -o "$OUTPUT_FILE"
-# Summary saved to divStats/roh.L3_Froh_gait_bookSize.sumStats.csv
+awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {if(gait[$1])print $0,gait[$1];else print $0,"undefined";}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.txt > ${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.txt
+INPUT_ROH="${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.txt"
+OUTPUT_FILE="${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.sumStats.csv"
+python scripts/summary_roh.py -i "$INPUT_ROH" -o "$OUTPUT_FILE" -n 4
+# Summary saved to ${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.sumStats.csv
 
 ## Froh vs ROHshared 
-roh_RG="divStats/roh.L3"
-froh="divStats/roh.L3_Froh_gait_bookSize.txt"
+roh_RG="${OUTPUT_DIR}/divStats/roh.L3"
+froh="${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.txt"
 for gp in "wholePop" "twoGait" "threeBooksize";do 
     conShare=${roh_RG}.perSample_intersect_${gp}_consensus_${pct}pct.summary.txt  ## the concensus length and % per sample (file for each "rg"), calculated in ROH section 
-    output_file="divStats/Froh_vs_ROHsh_${gp}.png"
+    output_file="${OUTPUT_DIR}/divStats/Froh_vs_ROHsh_${gp}.png"
     python scripts/roh_plot.py "$conShare" "$froh" "$output_file"
     rclone -v copy "$output_file" --drive-shared-with-me "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/"
-    output_prefix="divStats/normalized_ROHsh_${gp}"
+    output_prefix="${OUTPUT_DIR}/divStats/normalized_ROHsh_${gp}"
     run_python scripts/roh_histograms.py --metric ratio "$conShare" "$froh" "$output_prefix"
     upload "$output_prefix".histogram.png "Froh/"
     upload "$output_prefix".density.png "Froh/"
-    output_prefix2="divStats/ROHshared_${gp}"
+    output_prefix2="${OUTPUT_DIR}/divStats/ROHshared_${gp}"
     run_python scripts/roh_histograms.py --metric shared "$conShare" "$froh" "$output_prefix2"
     upload "$output_prefix2".histogram.png "Froh/"
-done &> divStats/roh_sh.log
+done &> ${OUTPUT_DIR}/divStats/roh_sh.log
 ## Outputs: (tested in "wholePop" "twoGait" "threeBooksize" BUT the best informative is "twoGait")
-## divStats/Froh_vs_ROHsh_${gp}.png
-## divStats/normalized_ROHsh_${gp}
-## divStats/ROHshared_${gp}
+## ${OUTPUT_DIR}/divStats/Froh_vs_ROHsh_${gp}.png
+## ${OUTPUT_DIR}/divStats/normalized_ROHsh_${gp}
+## ${OUTPUT_DIR}/divStats/ROHshared_${gp}
 
 ############################################
 ## x. Nucleotide diversity statistic (pi) -- This section is under development
@@ -1143,10 +1156,10 @@ done &> divStats/roh_sh.log
 ## 6. Relatedness work
 ############################################
 log "Section 6: Relatedness analysis"
-mkdir -p $work_dir/rep_ROHRM
-rohrm_dir="$work_dir/rep_ROHRM"
+mkdir -p $work_dir/${OUTPUT_DIR}/rep_ROHRM
+rohrm_dir="$work_dir/${OUTPUT_DIR}/rep_ROHRM"
 group="gait"
-phenotypes="preprocess/USTA_Diversity_Study.gait"
+phenotypes="${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait"
 
 
 ############################################
@@ -1229,10 +1242,10 @@ for roh_mb_cutoff in $ROH_CUTOFFS; do
     if [[ "$roh_mb_cutoff" == "$PRIMARY_ROH_MB" ]]; then
         ## animal pairs with high positive kinship difference (ROH-based kinship > standard kinship)
         awk 'BEGIN{FS=","} NR==1{print;next}{if($8>0.1) print}' \
-            $rohrm_dir/Pairwise_Differences.csv > high_positive_kinship_diff.csv
+            $rohrm_dir/Pairwise_Differences.csv > ${OUTPUT_DIR}/divStats/high_positive_kinship_diff.csv
         ## animal pairs with high negative kinship difference (standard kinship > ROH-based kinship)
         awk 'BEGIN{FS=","} NR==1{print;next}{if($8<-0.15) print}' \
-            $rohrm_dir/Pairwise_Differences.csv > high_negative_kinship_diff.csv
+            $rohrm_dir/Pairwise_Differences.csv > ${OUTPUT_DIR}/divStats/high_negative_kinship_diff.csv
         ## average centered kinship difference between and within gait groups
         awk 'BEGIN{FS=","} /Trotter/ && /Pacer/ {sum+=$8; n++} END{print "Ave diff Trotter-Pacer:", sum/n}' $rohrm_dir/Pairwise_Differences.csv
         awk 'BEGIN{FS=","} /Trotter/ && !/Pacer/ {sum+=$8; n++} END{print "Ave diff Trotter-Trotter:", sum/n}' $rohrm_dir/Pairwise_Differences.csv
@@ -1256,51 +1269,48 @@ done
 ############################################
 ## compare with het and coi
 ## Rscript that plots the correlation between KB and KBAVG from .hom.indiv and the difference O(HET) and E(HET), and F columns from .het
-RM_diag="rep_ROHRM/roh_1Mb.Threshold_3SD/Inbreeding_Comparison.csv" ## to read D_STD (comparable to COI "F" measure in 1) and D_ROH (comparable to F_ROH measured in 5)
-het_stats="divStats/filtered.LD_prune.het_stats.het"                ## to read O(HET), E(HET), and F_SNP
-Froh_stats="divStats/roh_summary_by_RG_L3_Froh.txt"          ## to read F_ROH measured in 5
-out_prefix="divStats/coi_Froh_rmDiag_correlation"
-Rscript scripts/correlation_plot_multiway_v2.R $RM_diag $het_stats $Froh_stats $out_prefix
+RM_diag="${OUTPUT_DIR}/rep_ROHRM/roh_1Mb.Threshold_3SD/Inbreeding_Comparison.csv" ## to read D_STD (comparable to COI "F" measure in 1) and D_ROH (comparable to F_ROH measured in 5)
+het_stats="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het"                ## to read O(HET), E(HET), and F_SNP
+Froh_stats="${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.txt"          ## to read F_ROH measured in 5
+out_prefix="${OUTPUT_DIR}/divStats/coi_Froh_rmDiag_correlation"
+Rscript scripts/correlation_plot.R --mode froh $RM_diag $het_stats $Froh_stats $out_prefix
 rclone -v copy $out_prefix.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 
 
-#roh_RG="divStats/roh.L3"; rg="wholePop"; pct=25; conShare=${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt;
-roh_RG="divStats/roh.L3"; rg="twoGait"; pct=25; conShare=${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt;
-out_prefix2="divStats/coi_Froh_rmDiag_conShare_correlation"
-Rscript scripts/correlation_plot_multiway_v2e.R $RM_diag $het_stats $Froh_stats $conShare $out_prefix2
+#roh_RG="${OUTPUT_DIR}/divStats/roh.L3"; rg="wholePop"; pct=25; conShare=${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt;
+roh_RG="${OUTPUT_DIR}/divStats/roh.L3"; rg="twoGait"; pct=25; conShare=${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt;
+out_prefix2="${OUTPUT_DIR}/divStats/coi_Froh_rmDiag_conShare_correlation"
+Rscript scripts/correlation_plot.R --mode froh-cons $RM_diag $het_stats $Froh_stats $conShare $out_prefix2
 rclone -v copy $out_prefix2.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 
 ## focus on D_STD vs ROH_shared
-awk 'BEGIN{FS=OFS="\t"}NR==FNR{a[$1]=$3;next}{print $0,a[$1]}' <(cat $conShare | sed 's/Percent_of_Consensus_ROH/ROH_sh/') <(cat $RM_diag | tr ',' '\t') > divStats/rmdiag_conShare
-#input_file="divStats/rmdiag_conShare"
-#Rscript $scripts/plot_correlation_withColors.R "$input_file" ROH_sh D_STD Phenotype
-#rclone -v copy divStats/correlation_plot_ROH_sh_vs_D_STD_Ann.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
- 
-awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])print $0,a[$1];}' preprocess/USTA_Diversity_Study.bookSize divStats/rmdiag_conShare > divStats/rmdiag_conShare_wBooksize
-input_file="divStats/rmdiag_conShare_wBooksize"
+awk 'BEGIN{FS=OFS="\t"}NR==FNR{a[$1]=$3;next}{print $0,a[$1]}' <(cat $conShare | sed 's/Percent_of_Consensus_ROH/ROH_sh/') <(cat $RM_diag | tr ',' '\t') > ${OUTPUT_DIR}/divStats/rmdiag_conShare
+
+awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])print $0,a[$1];}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.bookSize ${OUTPUT_DIR}/divStats/rmdiag_conShare > ${OUTPUT_DIR}/divStats/rmdiag_conShare_wBooksize
+input_file="${OUTPUT_DIR}/divStats/rmdiag_conShare_wBooksize"
 Rscript $scripts/plot_correlation_withColorsAndShapes.R "$input_file" ROH_sh D_STD Phenotype Book_Size
-rclone -v copy divStats/correlation_plot_ROH_sh_vs_D_STD_doubleAnn.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+rclone -v copy ${OUTPUT_DIR}/divStats/correlation_plot_ROH_sh_vs_D_STD_doubleAnn.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 
 ## focus on F_ROH vs D_ROH
-awk 'BEGIN{FS=OFS="\t"}NR==FNR{a[$1]=$5;next}{print $0,a[$1]}' $Froh_stats <(cat $RM_diag | tr ',' '\t') > divStats/rmdiag_Froh
-awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])print $0,a[$1];}' preprocess/USTA_Diversity_Study.bookSize divStats/rmdiag_Froh > divStats/rmdiag_Froh_wBooksize
-input_file="divStats/rmdiag_Froh_wBooksize"
+awk 'BEGIN{FS=OFS="\t"}NR==FNR{a[$1]=$5;next}{print $0,a[$1]}' $Froh_stats <(cat $RM_diag | tr ',' '\t') > ${OUTPUT_DIR}/divStats/rmdiag_Froh
+awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])print $0,a[$1];}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.bookSize ${OUTPUT_DIR}/divStats/rmdiag_Froh > ${OUTPUT_DIR}/divStats/rmdiag_Froh_wBooksize
+input_file="${OUTPUT_DIR}/divStats/rmdiag_Froh_wBooksize"
 Rscript $scripts/plot_correlation_withColorsAndShapes.R "$input_file" F_ROH D_ROH Phenotype Book_Size
-rclone -v copy divStats/correlation_plot_F_ROH_vs_D_ROH_doubleAnn.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+rclone -v copy ${OUTPUT_DIR}/divStats/correlation_plot_F_ROH_vs_D_ROH_doubleAnn.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 
 ## focus on F_SNP vs D_ROH
-awk 'BEGIN{FS=OFS="\t"}NR==1{a[$2]="F_SNP";next}NR==FNR{a[$2]=$8;next}{print $0,a[$1]}' $het_stats <(cat $RM_diag | tr ',' '\t') > divStats/rmdiag_Fsnp
-awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])print $0,a[$1];}' preprocess/USTA_Diversity_Study.bookSize divStats/rmdiag_Fsnp > divStats/rmdiag_Fsnp_wBooksize
-input_file="divStats/rmdiag_Fsnp_wBooksize"
+awk 'BEGIN{FS=OFS="\t"}NR==1{a[$2]="F_SNP";next}NR==FNR{a[$2]=$8;next}{print $0,a[$1]}' $het_stats <(cat $RM_diag | tr ',' '\t') > ${OUTPUT_DIR}/divStats/rmdiag_Fsnp
+awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])print $0,a[$1];}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.bookSize ${OUTPUT_DIR}/divStats/rmdiag_Fsnp > ${OUTPUT_DIR}/divStats/rmdiag_Fsnp_wBooksize
+input_file="${OUTPUT_DIR}/divStats/rmdiag_Fsnp_wBooksize"
 Rscript $scripts/plot_correlation_withColorsAndShapes.R "$input_file" F_SNP D_ROH Phenotype Book_Size
-rclone -v copy divStats/correlation_plot_F_SNP_vs_D_ROH_doubleAnn.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+rclone -v copy ${OUTPUT_DIR}/divStats/correlation_plot_F_SNP_vs_D_ROH_doubleAnn.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 
 ## focus on F_SNP vs F_ROH
-awk 'BEGIN{FS=OFS="\t"}NR==1{a[$2]="F_SNP";next}NR==FNR{a[$2]=$8;next}{print $0,a[$1]}' $het_stats divStats/rmdiag_Froh > divStats/rmdiag_Froh_Fsnp
-awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])print $0,a[$1];}' preprocess/USTA_Diversity_Study.bookSize divStats/rmdiag_Froh_Fsnp > divStats/rmdiag_Froh_Fsnp_wBooksize
-input_file="divStats/rmdiag_Froh_Fsnp_wBooksize"
+awk 'BEGIN{FS=OFS="\t"}NR==1{a[$2]="F_SNP";next}NR==FNR{a[$2]=$8;next}{print $0,a[$1]}' $het_stats ${OUTPUT_DIR}/divStats/rmdiag_Froh > ${OUTPUT_DIR}/divStats/rmdiag_Froh_Fsnp
+awk 'BEGIN{FS=OFS="\t";a["IID"]="Book_Size"}NR==FNR{a[$2]=$3;next}{if(a[$1])print $0,a[$1];}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.bookSize ${OUTPUT_DIR}/divStats/rmdiag_Froh_Fsnp > ${OUTPUT_DIR}/divStats/rmdiag_Froh_Fsnp_wBooksize
+input_file="${OUTPUT_DIR}/divStats/rmdiag_Froh_Fsnp_wBooksize"
 Rscript $scripts/plot_correlation_withColorsAndShapes.R "$input_file" F_SNP F_ROH Phenotype Book_Size
-rclone -v copy divStats/correlation_plot_F_SNP_vs_F_ROH_doubleAnn.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+rclone -v copy ${OUTPUT_DIR}/divStats/correlation_plot_F_SNP_vs_F_ROH_doubleAnn.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 
 
 ## Resume relatedness work ############################################
@@ -1309,18 +1319,18 @@ rclone -v copy divStats/correlation_plot_F_SNP_vs_F_ROH_doubleAnn.png "remote_UC
 ############################################
 plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
     --make-king-table 'counts' 'cols=+ibs1' \
-    --output-chr 'chrM' --out divStats/filtered.LD_prune.king_$group
+    --output-chr 'chrM' --out ${OUTPUT_DIR}/divStats/filtered.LD_prune.king_$group
 
-kingkin="divStats/filtered.LD_prune.king_$group.kin0"
+kingkin="${OUTPUT_DIR}/divStats/filtered.LD_prune.king_$group.kin0"
 awk -v size=0.05 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($10/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
                     END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(tail -n+2 $kingkin) > ${kingkin%.kin0}.histo
 rclone -v copy $kingkin "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 rclone -v copy ${kingkin%.kin0}.histo "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 
 ## Likely first-degree relations (maybe we neeed to increase this cut-off for such an inbreed population)
-head -n 1 $kingkin > divStats/related && tail -n +2 $kingkin | sort -grk10,10 | awk '{if($10>0.177)print}' >> divStats/related
-grep "Trotter" preprocess/USTA_Diversity_Study.$group | cut -f2 | grep -Fwf - divStats/related > divStats/related_Trotter
-grep "Pacer" preprocess/USTA_Diversity_Study.$group | cut -f2 | grep -Fwf - divStats/related > divStats/related_Pacer
+head -n 1 $kingkin > ${OUTPUT_DIR}/divStats/related && tail -n +2 $kingkin | sort -grk10,10 | awk '{if($10>0.177)print}' >> ${OUTPUT_DIR}/divStats/related
+grep "Trotter" ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.$group | cut -f2 | grep -Fwf - ${OUTPUT_DIR}/divStats/related > ${OUTPUT_DIR}/divStats/related_Trotter
+grep "Pacer" ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.$group | cut -f2 | grep -Fwf - ${OUTPUT_DIR}/divStats/related > ${OUTPUT_DIR}/divStats/related_Pacer
 ############################################
 ## calc IBS
 ############################################
@@ -1333,14 +1343,14 @@ awk 'BEGIN{FS=OFS="\t"}NR==1{print $0,"IBS";next}{ibs1=$8+$9;ibs2=$5-($6+$7+ibs1
 ## useless
 ## Plot the correlation between KING-robust kinship and IBS
 Rscript $scripts/plot_correlation.R ${kingkin}.withIBS KINSHIP IBS
-rclone -v copy divStats/correlation_plot_KINSHIP_vs_IBS.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+rclone -v copy ${OUTPUT_DIR}/divStats/correlation_plot_KINSHIP_vs_IBS.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 #Plot saved as: correlation_plot_KINSHIP_vs_IBS.png 
 #Correlation (Pearson): 0.392 
 
 ############################################
 ## PCA-based pairwise Euclidean distance
 ############################################
-for prefix in divStats/filtered.LD_prune{\.,\.Trotter\.,\.Pacer\.}pca ;do 
+for prefix in ${OUTPUT_DIR}/divStats/filtered.LD_prune{\.,\.Trotter\.,\.Pacer\.}pca ;do 
     awk '
     BEGIN {FS=OFS="\t"}
     $1!="#FID" && NF>3 {
@@ -1370,7 +1380,7 @@ done
 ## Useless
 ## Merge PCA-based Euclidean distance with KING-robust kinship + IBS
 kingkin_wIBS=${kingkin}.withIBS
-for prefix in divStats/filtered.LD_prune{\.,\.Trotter\.,\.Pacer\.}pca ;do 
+for prefix in ${OUTPUT_DIR}/divStats/filtered.LD_prune{\.,\.Trotter\.,\.Pacer\.}pca ;do 
     euclDist="$prefix.pca_pairwise_euclidean.dist"
     out_file="$prefix.pca_pairwise_euclidean.dist.withKIN0"
     awk 'BEGIN {FS=OFS="\t"} FNR == NR {
@@ -1408,28 +1418,28 @@ done
 
 ## useless
 ## Plot the correlation between PCA-based Euclidean distance and KING-robust kinship
-for prefix in divStats/filtered.LD_prune{\.,\.Trotter\.,\.Pacer\.}pca ;do 
+for prefix in ${OUTPUT_DIR}/divStats/filtered.LD_prune{\.,\.Trotter\.,\.Pacer\.}pca ;do 
     out_file="$prefix.pca_pairwise_euclidean.dist.withKIN0"
     Rscript $scripts/plot_correlation.R "$out_file" PCA_EUCLIDEAN_DIST KINSHIP_PLINK
-    mv divStats/correlation_plot_PCA_EUCLIDEAN_DIST_vs_KINSHIP_PLINK.png "$prefix.correlation_plot_PCA_EUCLIDEAN_DIST_vs_KINSHIP_PLINK.png"
+    mv ${OUTPUT_DIR}/divStats/correlation_plot_PCA_EUCLIDEAN_DIST_vs_KINSHIP_PLINK.png "$prefix.correlation_plot_PCA_EUCLIDEAN_DIST_vs_KINSHIP_PLINK.png"
     rclone -v copy "$prefix.correlation_plot_PCA_EUCLIDEAN_DIST_vs_KINSHIP_PLINK.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 done
 
 ############################################
 ## Plot the correlation among ROH-based relatedness, KING-robust kinship, and PCA-based Euclidean distance
 ############################################
-RMs="rep_ROHRM/roh_1Mb.Threshold_3SD/Pairwise_Differences.csv" ## file1 has Kinship_Std and Kinship_ROH columns
-kingkin_wIBS="divStats/filtered.LD_prune.king_$group.kin0.withIBS" ## file2 has KINSHIP and IBS columns
+RMs="${OUTPUT_DIR}/rep_ROHRM/roh_1Mb.Threshold_3SD/Pairwise_Differences.csv" ## file1 has Kinship_Std and Kinship_ROH columns
+kingkin_wIBS="${OUTPUT_DIR}/divStats/filtered.LD_prune.king_$group.kin0.withIBS" ## file2 has KINSHIP and IBS columns
 for pop in "wholePop" "Trotter" "Pacer";do
-    pca_prefix=$(echo divStats/filtered.LD_prune.$pop.pca | sed 's/wholePop\.//')
+    pca_prefix=$(echo ${OUTPUT_DIR}/divStats/filtered.LD_prune.$pop.pca | sed 's/wholePop\.//')
     euclDist="$pca_prefix.pca_pairwise_euclidean.dist" ## file3 has PCA_EUCLIDEAN_DIST column
-    out_prefix="divStats/$pop.relatedness_correlation"
-    Rscript scripts/correlation_plot_multiway_v3.R $RMs $kingkin_wIBS $euclDist $out_prefix
+    out_prefix="${OUTPUT_DIR}/divStats/$pop.relatedness_correlation"
+    Rscript scripts/correlation_plot.R --mode pairwise $RMs $kingkin_wIBS $euclDist $out_prefix
     rclone -v copy $out_prefix.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 done
-cat rep_ROHRM/roh_1Mb.Threshold_3SD/Pairwise_Differences.csv | sed 's/ID/IID/g' | awk 'BEGIN{FS=",";OFS="\t";}{a[1]=$1;a[2]=$2;asort(a);print a[1],a[2],$5,$6}' > divStats/tmp_kin1
-cat divStats/filtered.LD_prune.king_$group.kin0.withIBS | awk 'BEGIN{FS=OFS="\t";}{a[1]=$2;a[2]=$4;asort(a);print a[1],a[2],$10,$11}' > divStats/tmp_kin2
-awk 'BEGIN{FS=OFS="\t";}NR==FNR{a[$1 FS $2]=$0;next}{if(a[$1 FS $2])print a[$1 FS $2],$3,$4}' divStats/tmp_kin1 divStats/tmp_kin2 > divStats/merged_kin
-head -n 1 divStats/merged_kin > divStats/merged_kin_sorted_top && tail -n +2 divStats/merged_kin | sort -grk5,5 | awk '{if($5>0.1)print}' >> divStats/merged_kin_sorted_top
+cat ${OUTPUT_DIR}/rep_ROHRM/roh_1Mb.Threshold_3SD/Pairwise_Differences.csv | sed 's/ID/IID/g' | awk 'BEGIN{FS=",";OFS="\t";}{a[1]=$1;a[2]=$2;asort(a);print a[1],a[2],$5,$6}' > ${OUTPUT_DIR}/divStats/tmp_kin1
+cat ${OUTPUT_DIR}/divStats/filtered.LD_prune.king_$group.kin0.withIBS | awk 'BEGIN{FS=OFS="\t";}{a[1]=$2;a[2]=$4;asort(a);print a[1],a[2],$10,$11}' > ${OUTPUT_DIR}/divStats/tmp_kin2
+awk 'BEGIN{FS=OFS="\t";}NR==FNR{a[$1 FS $2]=$0;next}{if(a[$1 FS $2])print a[$1 FS $2],$3,$4}' ${OUTPUT_DIR}/divStats/tmp_kin1 ${OUTPUT_DIR}/divStats/tmp_kin2 > ${OUTPUT_DIR}/divStats/merged_kin
+head -n 1 ${OUTPUT_DIR}/divStats/merged_kin > ${OUTPUT_DIR}/divStats/merged_kin_sorted_top && tail -n +2 ${OUTPUT_DIR}/divStats/merged_kin | sort -grk5,5 | awk '{if($5>0.1)print}' >> ${OUTPUT_DIR}/divStats/merged_kin_sorted_top
 
 ########################################################

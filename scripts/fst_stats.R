@@ -1,11 +1,16 @@
 library(dplyr)
 
 # --- CONFIGURATION ---
-file_sex      <- "divStats/filtered.LD_prune.fst_sex.fst.summary"
-file_gait     <- "divStats/filtered.LD_prune.fst_gait.fst.summary"
-file_book_all <- "divStats/filtered.LD_prune.fst_bookSize.fst.summary"
-file_book_trotter <- "divStats/filtered.LD_prune.fst_bookSize.Trotter.fst.summary"
-file_book_pacer   <- "divStats/filtered.LD_prune.fst_bookSize.Pacer.fst.summary"
+# Usage: Rscript fst_stats.R <output_dir>
+#   <output_dir> is the per-run results directory (e.g. results_20260419_143022)
+args <- commandArgs(trailingOnly = TRUE)
+if (length(args) < 1) stop("Usage: Rscript fst_stats.R <output_dir>", call. = FALSE)
+div_dir <- file.path(args[1], "divStats")
+file_sex      <- file.path(div_dir, "filtered.LD_prune.fst_sex.fst.summary")
+file_gait     <- file.path(div_dir, "filtered.LD_prune.fst_gait.fst.summary")
+file_book_all <- file.path(div_dir, "filtered.LD_prune.fst_bookSize.fst.summary")
+file_book_trotter <- file.path(div_dir, "filtered.LD_prune.fst_bookSize.Trotter.fst.summary")
+file_book_pacer   <- file.path(div_dir, "filtered.LD_prune.fst_bookSize.Pacer.fst.summary")
 
 # --- FIXED FUNCTION ---
 load_fst <- function(filepath, category_label) {
@@ -83,4 +88,4 @@ cat("\n=== FST STATISTICAL ANALYSIS (Adjusted P-Values) ===\n")
 cat("Total Tests (Correction Factor):", n_tests, "\n")
 print(as.data.frame(output_table))
 
-write.csv(output_table, "Fst_Analysis_Results_Adjusted.csv", row.names = FALSE)
+write.csv(output_table, file.path(div_dir, "Fst_Analysis_Results_Adjusted.csv"), row.names = FALSE)
