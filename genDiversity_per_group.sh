@@ -335,3 +335,88 @@ if [[ "$rg" != "wholePop" ]]; then
         | grep -Fwf - "${OUTPUT_DIR}/divStats/related" \
         > "${OUTPUT_DIR}/divStats/related_${rg}"
 fi
+
+##########################################
+## 11. PCA-based pairwise Euclidean distance
+##########################################
+awk '
+BEGIN {FS=OFS="\t"}
+$1!="#FID" && NF>3 {
+    n++
+    fid[n]=$1
+    iid[n]=$2
+    for(c=3;c<=NF;c++) pc[n,c-2] = $c
+    npcs = NF - 2
+}
+END {
+    print "FID1","IID1","FID2","IID2","PCA_EUCLIDEAN_DIST","DIST_KINSHIP"
+    for(i=1;i<=n;i++)
+        for(j=1;j<i;j++) {
+            dist2=0
+            for(c=1;c<=npcs;c++) {
+                d = pc[i,c] - pc[j,c]
+                dist2 += d*d
+            }
+            dist = sqrt(dist2)
+            printf "%s\t%s\t%s\t%s\t%.8f\t%.8f\n",
+                fid[i], iid[i], fid[j], iid[j], dist, exp(-dist2/2)
+        }
+}
+' "$pca_prefix.eigenvec" > "$pca_prefix.pca_pairwise_euclidean.dist"
+
+##########################################
+## 12. Merge PCA Euclidean distance with whole-pop KING + IBS
+##########################################
+euclDist="$pca_prefix.pca_pairwise_euclidean.dist"
+out_file="$pca_prefix.pca_pairwise_euclidean.dist.withKIN0"
+awk 'BEGIN {FS=OFS="\t"} FNR == NR {
+    if ($1 ~ /^#/) next
+    key = ($1":"$2 < $3":"$4) ?
+        $1":"$2"|" $3":"$4 :
+        $3":"$4"|" $1":"$2
+    kin0_extra = ""
+    for (i = 5; i <= NF; i++)
+        kin0_extra = kin0_extra OFS $i
+    kin0_data[key] = substr(kin0_extra, 2)
+    next
+}
+FNR == 1 {
+    print "FID1","IID1","FID2","IID2",
+        "PCA_EUCLIDEAN_DIST","KINSHIP_KING_PCA",
+        "NSNP","HETHET","IBS0","HET1_HOM2","HET2_HOM1","KINSHIP_PLINK","IBS"
+    next
+}
+{
+    key = ($1":"$2 < $3":"$4) ?
+        $1":"$2"|" $3":"$4 :
+        $3":"$4"|" $1":"$2
+    extra = (key in kin0_data ? kin0_data[key] : "NA")
+    print $1,$2,$3,$4,$5,$6,extra
+}
+' "$kingkin_wIBS" "$euclDist" > "$out_file"
+
+##########################################
+## 13. PCA Euclidean vs KING kinship correlation plot
+##########################################
+Rscript "$scripts/plot_correlation.R" "$out_file" PCA_EUCLIDEAN_DIST KINSHIP_PLINK
+mv "${OUTPUT_DIR}/divStats/correlation_plot_PCA_EUCLIDEAN_DIST_vs_KINSHIP_PLINK.png" \
+   "$pca_prefix.correlation_plot_PCA_EUCLIDEAN_DIST_vs_KINSHIP_PLINK.png"
+rclone -v copy "$pca_prefix.correlation_plot_PCA_EUCLIDEAN_DIST_vs_KINSHIP_PLINK.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+
+##########################################
+## 14. Cross-method correlation plot (ROHRM vs KING vs PCA, per group)
+##########################################
+## For wholePop we keep the bare-name out_prefix to match today's
+## filtered.LD_prune.pca.relatedness_correlation.* produced by the old
+## inline loop that stripped "wholePop." from the name.
+if [[ "$rg" == "wholePop" ]]; then
+    out_prefix="${OUTPUT_DIR}/divStats/wholePop.relatedness_correlation"
+else
+    out_prefix="${OUTPUT_DIR}/divStats/${rg}.relatedness_correlation"
+fi
+Rscript scripts/correlation_plot.R --mode pairwise \
+    "${canonical_dir}/Pairwise_Differences.${rg}.csv" \
+    "$kingkin_wIBS" \
+    "$euclDist" \
+    "$out_prefix"
+rclone -v copy "$out_prefix.pairplot.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me

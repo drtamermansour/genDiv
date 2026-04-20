@@ -58,7 +58,23 @@ for gp in wholePop twoGait threeBooksize; do
     upload "$output_prefix2".histogram.png "Froh/"
 done &> "${OUTPUT_DIR}/divStats/roh_sh.log"
 
-## Still inline in genDiversity.sh: merged_kin_sorted_top across ROHRM/KING/PCA.
-## That one depends on the whole-pop KING / Pairwise_Differences produced in
-## the still-inline Section-6 block; it'll move here when that block is
-## extracted.
+##########################################
+## Top-pair cross-reference (ROHRM vs KING vs PCA)
+##########################################
+## Canonicalize pair identities (a[1],a[2]) in each source, join on them, then
+## keep pairs where the ROHRM Kinship_Std column exceeds 0.1 — a quick "these
+## look genuinely related by both methods" shortlist.
+group="gait"
+cat "${OUTPUT_DIR}/rep_ROHRM/roh_1Mb.Threshold_3SD/Pairwise_Differences.csv" \
+    | sed 's/ID/IID/g' \
+    | awk 'BEGIN{FS=",";OFS="\t";}{a[1]=$1;a[2]=$2;asort(a);print a[1],a[2],$5,$6}' \
+    > "${OUTPUT_DIR}/divStats/tmp_kin1"
+cat "${OUTPUT_DIR}/divStats/filtered.LD_prune.king_${group}.kin0.withIBS" \
+    | awk 'BEGIN{FS=OFS="\t";}{a[1]=$2;a[2]=$4;asort(a);print a[1],a[2],$10,$11}' \
+    > "${OUTPUT_DIR}/divStats/tmp_kin2"
+awk 'BEGIN{FS=OFS="\t";}NR==FNR{a[$1 FS $2]=$0;next}{if(a[$1 FS $2])print a[$1 FS $2],$3,$4}' \
+    "${OUTPUT_DIR}/divStats/tmp_kin1" "${OUTPUT_DIR}/divStats/tmp_kin2" \
+    > "${OUTPUT_DIR}/divStats/merged_kin"
+head -n 1 "${OUTPUT_DIR}/divStats/merged_kin" > "${OUTPUT_DIR}/divStats/merged_kin_sorted_top"
+tail -n +2 "${OUTPUT_DIR}/divStats/merged_kin" | sort -grk5,5 | awk '{if($5>0.1)print}' \
+    >> "${OUTPUT_DIR}/divStats/merged_kin_sorted_top"
