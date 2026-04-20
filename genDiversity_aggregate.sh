@@ -15,12 +15,30 @@ vcf_filtered="${OUTPUT_DIR}/filtered/USTA_Diversity_Study.remap.refAlleles.dedup
 phenotypes="${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait"
 roh_RG="${OUTPUT_DIR}/divStats/roh.L3"
 
-## The cross-group summaries currently live inline in genDiversity.sh's
-## remaining Section 5/6 blocks (Froh_vs_ROHsh plots iterating over
-## wholePop/twoGait/threeBooksize, merged_kin_sorted_top, etc.). They will
-## move here in subsequent commits once the whole-pop KING / ROHRM / IBS /
-## Euclidean work they depend on is itself moved out of the wrapper.
+##########################################
+## Cross-group per-sample ROH_sh concatenations
+##########################################
+## twoGait   = Trotter + Pacer rows from each gait's own consensus-intersect file.
+## threeBooksize = the six book-size subgroup rows (Trotter_LOW/MEDIUM/HIGH +
+##                 Pacer_LOW/MEDIUM/HIGH).
+## Each sample therefore appears exactly once in each concatenation, under the
+## consensus of the gait (or book-size subgroup) it actually belongs to. These
+## files feed the Froh-vs-ROHsh plots in the inline Section-5 block of
+## genDiversity.sh (iterating `for gp in wholePop twoGait threeBooksize`).
+head -n1 "${roh_RG}.perSample_intersect_wholePop_consensus_${pct}pct.summary.txt" \
+    > "${roh_RG}.perSample_intersect_twoGait_consensus_${pct}pct.summary.txt"
+for rg in Trotter Pacer; do
+    tail -n+2 "${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt"
+done >> "${roh_RG}.perSample_intersect_twoGait_consensus_${pct}pct.summary.txt"
 
-## For now this script is a no-op placeholder — it just sources common and
-## logs its own entry so the wrapper can call it and the pipeline still runs
-## end-to-end.
+head -n1 "${roh_RG}.perSample_intersect_wholePop_consensus_${pct}pct.summary.txt" \
+    > "${roh_RG}.perSample_intersect_threeBooksize_consensus_${pct}pct.summary.txt"
+for rg in Trotter_LOW Trotter_MEDIUM Trotter_HIGH Pacer_LOW Pacer_MEDIUM Pacer_HIGH; do
+    tail -n+2 "${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt"
+done >> "${roh_RG}.perSample_intersect_threeBooksize_consensus_${pct}pct.summary.txt"
+
+## Additional cross-group outputs still live inline in genDiversity.sh:
+## Froh-vs-ROHsh plots (for gp in wholePop twoGait threeBooksize) and the
+## merged_kin_sorted_top across ROHRM/KING/PCA. They'll move here in a later
+## commit once the whole-pop KING / IBS / Euclidean code they depend on is
+## itself moved out of the wrapper.
