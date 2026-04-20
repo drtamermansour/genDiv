@@ -12,14 +12,21 @@ See also:
 
 ## Running the Pipeline
 
-The entire pipeline is orchestrated by a single bash script:
+The pipeline is a thin wrapper that composes three subscripts:
 
 ```bash
 conda activate genDiv
 bash ./genDiversity.sh
 ```
 
-The script is not designed to be run in sections interactively — individual sections are commented/uncommented as needed during development.
+The wrapper sources shared CONFIG/helpers, invokes shared preprocessing once, loops the per-group stage three times (wholePop/Trotter/Pacer), then runs cross-group aggregation. Each subscript is independently runnable, which is handy for debugging or refreshing one stage:
+
+```bash
+bash ./genDiversity_shared.sh                 # preprocessing (Sections 1–3 + whole-pop ROH)
+bash ./genDiversity_per_group.sh wholePop     # per-group metrics (repeat for Trotter, Pacer)
+bash ./genDiversity_per_group.sh Trotter
+bash ./genDiversity_per_group.sh Pacer
+```
 
 ## Environment Setup
 
@@ -35,18 +42,29 @@ Uses conda/mamba with a named environment `genDiv`. Full setup command lives in 
 
 ### Entry Point
 
-**`genDiversity.sh`** — monolithic bash pipeline with `set -eo pipefail`, an `ERR` trap that reports the failing line number, a CONFIG section at lines 4–35 (thresholds, paths, seeds centralized there), and helper functions `log()`, `run_python()`, `run_r()`, `upload()` at lines 40–50.
+The pipeline is split across four bash files at the repo root:
 
-Structurally the script is **not** 8 cleanly numbered sections. It has 5 `log "Section …"` markers (`genDiversity.sh:60, 135, 366, 481, 1145`) plus many inline subsections. Conceptually the workflow phases are:
+| File | Role | Invocation |
+|---|---|---|
+| `genDiversity.sh` | Thin wrapper: sources common, runs shared → loops per_group × 3 → runs aggregate | `bash genDiversity.sh` |
+| `genDiversity_common.sh` | CONFIG, helpers (`log`, `run_python`, `run_r`, `upload`), `ERR` trap, log redirection (guarded by `GENDIV_LOG_SETUP` so subscripts don't double-log) | sourced |
+| `genDiversity_shared.sh` | Whole-pop preprocessing that runs once: Sections 1–3 + whole-pop ROH calling + per-base consensus + effective-genome-length + whole-pop F_SNP het + `samples.{wholePop,Trotter,Pacer}.txt` | `bash genDiversity_shared.sh` |
+| `genDiversity_per_group.sh` | Per-group metric stage; takes `$rg ∈ {wholePop, Trotter, Pacer}`, runs 3× | `bash genDiversity_per_group.sh <rg>` |
 
-1. **Data Download & Preprocessing** — rclone from Google Drive, PLINK ID updates, EquCab3 remapping, SNP deduplication, PLINK1→PLINK2 conversion
-2. **Data Exploration** — sex validation (X chr F-stats), PAR removal, heterozygosity, allele frequency, HWE analysis
-3. **Final Filtering** — apply missingness/MAF/HWE thresholds to produce clean dataset
-4. **ROH Analysis** — call ROH with PLINK2 (`--hom`, min 1Mb), compute consensus ROH regions (≥25% samples, min 500kb), F_ROH inbreeding coefficients, stratify by gait (Pacer/Trotter) and book size (HIGH/MEDIUM/LOW)
-5. **Nucleotide Diversity** — pi calculations. **Under development** — this section is a stub/comments about SNP-array ascertainment bias. Pending decision (see `REFACTORING.md` §1): complete an array-aware π implementation, or remove.
-6. **Genomic Relatedness** — standard GRM (vanRaden via PLINK2) and novel ROH-based Relatedness Matrix (ROHRM)
-7. **Additional Relatedness** — KING-robust kinship, IBS, PCA-based Euclidean distance, cross-method correlations
-8. **Upload** — results to Google Drive via rclone (interleaved throughout, not a dedicated final section)
+All scripts respect `OUTPUT_DIR` as an env override, so re-running into an existing folder (e.g., to refresh just one group) works the same way as a fresh timestamped run.
+
+`set -eo pipefail` applies everywhere; the `ERR` trap reports the failing line number from whichever subscript errored.
+
+Conceptual workflow phases (the split is organizational — execution order is the same as before):
+
+1. **Data Download & Preprocessing** (in `shared.sh`) — rclone from Google Drive, PLINK ID updates, EquCab3 remapping, SNP deduplication, PLINK1→PLINK2 conversion.
+2. **Data Exploration** (in `shared.sh`) — sex validation (X chr F-stats), PAR removal, HWE analysis.
+3. **Final Filtering** (in `shared.sh`) — apply missingness/MAF/HWE thresholds to produce the clean dataset.
+4. **ROH Analysis** (in `shared.sh`) — bcftools roh on the whole-pop phased VCF, L1/L2/L3 filter chain, per-base consensus regions across wholePop + gait + book-size subgroups, effective autosomal genome length. The book-size / twoGait / threeBooksize concatenations used by downstream plots are also produced here.
+5. **Whole-pop F_SNP het** (in `shared.sh`) — `plink2 --het` on all samples, producing the whole-pop het file consumed by the per-group COI overlays.
+6. **Per-group reference files** (in `per_group.sh`, run once per `$rg`) — PCA + overlays (wSex / wGait / wBook_Size / wCOI, with wSex and wGait wholePop-only), FST book-size-within-gait (Trotter/Pacer only), plus the GPA-proposal deliverables: `pruned.${rg}.afreq`, `filtered.LD_prune.het_stats.${rg}.het`, `roh_summary_by_RG_L3_Froh.${rg}.txt`, `Inbreeding_Comparison.${rg}.csv`, `Pairwise_Differences.${rg}.csv`.
+7. **Whole-pop relatedness** (still inline in `genDiversity.sh` — Section 6 work, to be extracted later) — KING-robust kinship, IBS, PCA-based Euclidean distance, cross-method correlations.
+8. **Upload** — `rclone` is invoked throughout each subscript; there's no single upload phase.
 
 ### Python Scripts (`scripts/`)
 
@@ -100,32 +118,59 @@ Grouped by role. Each script's `genDiversity.sh` call site in parentheses.
 ### Data Flow
 
 ```
-Google Drive (rclone)
-  → PLINK preprocessing (bash)
-  → PLINK2 QC & filtering
-  → PLINK2 ROH calling → ROHRM_Creator.py (phased VCF required)
-  → PLINK2 GRM → analysis_comparison.py
-  → R scripts (visualization)
-  → Google Drive (rclone upload)
+Google Drive (rclone download)
+  ↓
+genDiversity_shared.sh  (runs once)
+  PLINK preprocessing → QC & filtering → LD pruning
+  → bcftools roh on whole-pop phased VCF → L1/L2/L3 filter → per-base consensus
+  → effective_autosomal_genome_length.txt
+  → whole-pop plink2 --het (F_SNP seed)
+  → preprocess/samples.{wholePop,Trotter,Pacer}.txt + sample_groups.tsv
+  ↓
+genDiversity_per_group.sh  (runs 3× — wholePop, Trotter, Pacer)
+  plink2 --pca (+ wSex/wGait/wBook_Size/wCOI overlays, wholePop extras)
+  → FST book-size-within-gait (Trotter/Pacer)
+  → pruned.${rg}.afreq  → filtered.LD_prune.het_stats.${rg}.het (via --read-freq)
+  → bcftools roh on group-subset VCF → roh_summary_by_RG_L3_Froh.${rg}.txt
+  → plink2 --make-rel (group GRM) + ROHRM_Creator.py (group ROHRM)
+  → analysis_comparison.py → Inbreeding_Comparison.${rg}.csv + Pairwise_Differences.${rg}.csv
+  ↓
+genDiversity.sh  (still inline — wholePop KING / IBS / Euclidean / correlation plots)
+  ↓
+Google Drive (rclone upload — interleaved, not a dedicated phase)
 ```
 
 ### Repository layout expectations
 
-`genDiversity.sh` creates and uses two top-level directories:
+The pipeline creates and uses one top-level directory per run:
 
-- `results_<timestamp>/` — per-run output directory. Contains the downloaded inputs (`SNPdata_iScan_Standardbred/`, `Miscellaneous_documents_standardbred/`) alongside pipeline outputs (`preprocess/`, `dedup/`, `inspect/`, `filtered/`, `LD_pruned/`, `divStats/`, `rep_ROHRM/`) and the run log (`run.log`). `<timestamp>` is `YYYYMMDD_HHMMSS` captured when the script starts; override by exporting `OUTPUT_DIR=<existing_dir>` before invocation to reuse or resume into a prior folder. Subdir names after the timestamped prefix are unchanged from the pre-refactor layout.
+- `results_<timestamp>/` — per-run output directory. Contains the downloaded inputs (`SNPdata_iScan_Standardbred/`, `Miscellaneous_documents_standardbred/`) alongside pipeline outputs (`preprocess/`, `dedup/`, `inspect/`, `filtered/`, `LD_pruned/`, `divStats/`, `rep_ROHRM/`) and the run log (`run.log`). `<timestamp>` is `YYYYMMDD_HHMMSS` captured when the script starts; override by exporting `OUTPUT_DIR=<existing_dir>` before invocation to reuse or resume into a prior folder. Subdir names after the timestamped prefix are unchanged from the pre-refactor layout. Per-group work adds `rep_ROHRM/perGroup_${rg}/` working dirs and `preprocess/samples.${rg}.txt` / `sample_groups.tsv` artifacts.
 
 `results_*/` is in `.gitignore`.
 
-Each run writes its full stdout+stderr to `${OUTPUT_DIR}/run.log` via a `tee` + `exec` redirection set near the top of the script.
+Each run writes its full stdout+stderr to `${OUTPUT_DIR}/run.log` via a `tee` + `exec` redirection set up in `genDiversity_common.sh`. The redirection is guarded by the `GENDIV_LOG_SETUP` env var so subscripts invoked by the wrapper inherit its pipe instead of piling on their own tee and double-writing every line.
 
-`genDiversity.sh` also expects two sibling repositories and a configured rclone remote to exist:
+The pipeline also expects two sibling repositories and a configured rclone remote to exist:
 
 - `../Equine80select_remapper/results/matchingSNPs_binary_consistantMapping.equCab3_map` — EquCab3 remap table
 - `../Horse_parentage_SNPs/equCab3/download/equCab3.fa` + `equCab3_genome.fa.fai` — reference genome
 - `remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs` — rclone remote for input download and output upload
 
 A fresh clone of `genDiv` alone will fail early with path errors. `REFACTORING.md` §7 tracks a suggestion to validate these at script start.
+
+### GPA per-group reference files
+
+The `per_group.sh` stage produces the deliverables consumed by the downstream GPA report pipeline (`../GPA/create_popFiles.sh`):
+
+| File | Location | Purpose |
+|---|---|---|
+| `pruned.${rg}.afreq` | `LD_pruned/` | group-specific allele frequencies (feeds `--read-freq`) |
+| `filtered.LD_prune.het_stats.${rg}.het` | `divStats/` | F_SNP het reference, computed with group AF |
+| `roh_summary_by_RG_L3_Froh.${rg}.txt` | `divStats/` | F_ROH reference (bcftools roh on group-subset VCF) |
+| `Inbreeding_Comparison.${rg}.csv` | `rep_ROHRM/roh_1Mb.Threshold_3SD/` | D_SNP (col idx 1) + D_ROH (col idx 2), IID,D_STD,D_ROH,Phenotype |
+| `Pairwise_Differences.${rg}.csv` | `rep_ROHRM/roh_1Mb.Threshold_3SD/` | G_SNP (col idx 4) + G_ROH (col idx 5), ID1,ID2,Pheno1,Pheno2,Kinship_Std,Kinship_ROH,Difference |
+
+GPA reads by fixed column index — any schema drift breaks the report silently. Keep `analysis_comparison.py` column orderings stable.
 
 ## Key Parameters & Thresholds
 
