@@ -681,3 +681,8 @@ awk 'BEGIN{FS=OFS="\t";}NR==FNR{a[$1 FS $2]=$0;next}{if(a[$1 FS $2])print a[$1 F
 head -n 1 ${OUTPUT_DIR}/divStats/merged_kin > ${OUTPUT_DIR}/divStats/merged_kin_sorted_top && tail -n +2 ${OUTPUT_DIR}/divStats/merged_kin | sort -grk5,5 | awk '{if($5>0.1)print}' >> ${OUTPUT_DIR}/divStats/merged_kin_sorted_top
 
 ########################################################
+
+## Cross-group aggregation (currently a no-op stub; future commits will
+## move twoGait/threeBooksize summaries + Froh_vs_ROHsh plots + merged_kin_sorted_top
+## here from the inline Section 5/6 blocks above).
+bash "$(dirname "$0")/genDiversity_aggregate.sh"
