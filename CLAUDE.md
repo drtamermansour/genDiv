@@ -9,6 +9,9 @@ This is a genomic diversity assessment pipeline for Standardbred horses (~500+ i
 See also:
 - `README.md` — human-oriented setup recipe (conda/mamba environment).
 - `REFACTORING.md` — open suggestions and TODOs collected while reviewing the codebase.
+- `MIGRATION.md` — the filename / schema contract between this pipeline and the downstream GPA report pipeline (`../GPA/`). Update it whenever a producer here or a consumer there changes.
+- `scripts/validate_popRefs.sh` — dual-mode validator for the per-group reference files; runs at end of the pipeline (and at end of GPA's `create_popFiles.sh` once the GPA-side PR lands).
+- `scripts/benchmark/run_benchmark.sh` — builds a 25-Trotter + 25-Pacer subset from an existing full-run `OUTPUT_DIR` and runs `per_group.sh × 3 + aggregate.sh` end-to-end for fast regression testing.
 
 ## Running the Pipeline
 
@@ -22,10 +25,11 @@ bash ./genDiversity.sh
 The wrapper sources shared CONFIG/helpers, invokes shared preprocessing once, loops the per-group stage three times (wholePop/Trotter/Pacer), then runs cross-group aggregation. Each subscript is independently runnable, which is handy for debugging or refreshing one stage:
 
 ```bash
-bash ./genDiversity_shared.sh                 # preprocessing (Sections 1–3 + whole-pop ROH)
+bash ./genDiversity_shared.sh                 # preprocessing + whole-pop KING / FST / A_e
 bash ./genDiversity_per_group.sh wholePop     # per-group metrics (repeat for Trotter, Pacer)
 bash ./genDiversity_per_group.sh Trotter
 bash ./genDiversity_per_group.sh Pacer
+bash ./genDiversity_aggregate.sh              # cross-group summaries + plots
 ```
 
 ## Environment Setup
@@ -42,28 +46,29 @@ Uses conda/mamba with a named environment `genDiv`. Full setup command lives in 
 
 ### Entry Point
 
-The pipeline is split across four bash files at the repo root:
+The pipeline is split across five bash files at the repo root:
 
 | File | Role | Invocation |
 |---|---|---|
 | `genDiversity.sh` | Thin wrapper: sources common, runs shared → loops per_group × 3 → runs aggregate | `bash genDiversity.sh` |
 | `genDiversity_common.sh` | CONFIG, helpers (`log`, `run_python`, `run_r`, `upload`), `ERR` trap, log redirection (guarded by `GENDIV_LOG_SETUP` so subscripts don't double-log) | sourced |
-| `genDiversity_shared.sh` | Whole-pop preprocessing that runs once: Sections 1–3 + whole-pop ROH calling + per-base consensus + effective-genome-length + whole-pop F_SNP het + `samples.{wholePop,Trotter,Pacer}.txt` | `bash genDiversity_shared.sh` |
+| `genDiversity_shared.sh` | Whole-pop preprocessing (Sections 1–3) + A_e + FST + effective-genome-length + autosomes.genome + whole-pop KING + IBS + `samples.{wholePop,Trotter,Pacer}.txt` + `sample_groups.tsv` | `bash genDiversity_shared.sh` |
 | `genDiversity_per_group.sh` | Per-group metric stage; takes `$rg ∈ {wholePop, Trotter, Pacer}`, runs 3× | `bash genDiversity_per_group.sh <rg>` |
+| `genDiversity_aggregate.sh` | Cross-group summaries (twoGait / threeBooksize), F_ROH histograms + gait/book-size stratified summaries, Froh-vs-ROHsh plots, merged-kin top-pair cross-reference | `bash genDiversity_aggregate.sh` |
 
 All scripts respect `OUTPUT_DIR` as an env override, so re-running into an existing folder (e.g., to refresh just one group) works the same way as a fresh timestamped run.
 
 `set -eo pipefail` applies everywhere; the `ERR` trap reports the failing line number from whichever subscript errored.
 
-Conceptual workflow phases (the split is organizational — execution order is the same as before):
+Conceptual workflow phases:
 
-1. **Data Download & Preprocessing** (in `shared.sh`) — rclone from Google Drive, PLINK ID updates, EquCab3 remapping, SNP deduplication, PLINK1→PLINK2 conversion.
-2. **Data Exploration** (in `shared.sh`) — sex validation (X chr F-stats), PAR removal, HWE analysis.
-3. **Final Filtering** (in `shared.sh`) — apply missingness/MAF/HWE thresholds to produce the clean dataset.
-4. **ROH Analysis** (in `shared.sh`) — bcftools roh on the whole-pop phased VCF, L1/L2/L3 filter chain, per-base consensus regions across wholePop + gait + book-size subgroups, effective autosomal genome length. The book-size / twoGait / threeBooksize concatenations used by downstream plots are also produced here.
-5. **Whole-pop F_SNP het** (in `shared.sh`) — `plink2 --het` on all samples, producing the whole-pop het file consumed by the per-group COI overlays.
-6. **Per-group reference files** (in `per_group.sh`, run once per `$rg`) — PCA + overlays (wSex / wGait / wBook_Size / wCOI, with wSex and wGait wholePop-only), FST book-size-within-gait (Trotter/Pacer only), plus the GPA-proposal deliverables: `pruned.${rg}.afreq`, `filtered.LD_prune.het_stats.${rg}.het`, `roh_summary_by_RG_L3_Froh.${rg}.txt`, `Inbreeding_Comparison.${rg}.csv`, `Pairwise_Differences.${rg}.csv`.
-7. **Whole-pop relatedness** (still inline in `genDiversity.sh` — Section 6 work, to be extracted later) — KING-robust kinship, IBS, PCA-based Euclidean distance, cross-method correlations.
+1. **Data Download & Preprocessing** (`shared.sh`) — rclone from Google Drive, PLINK ID updates, EquCab3 remapping, SNP deduplication, PLINK1→PLINK2 conversion.
+2. **Data Exploration** (`shared.sh`) — sex validation (X chr F-stats), PAR removal, HWE analysis.
+3. **Final Filtering** (`shared.sh`) — apply missingness/MAF/HWE thresholds to produce the clean dataset; LD pruning.
+4. **Whole-pop diversity metrics** (`shared.sh`) — A_e (effective-allele number, per SNP and stratified by gait and gait×book-size via `--loop-cats`), FST between subpopulations (sex / gait / book-size), effective autosomal genome length, autosomes.genome.
+5. **Whole-pop KING-robust kinship + IBS** (`shared.sh`) — plink2 `--make-king-table`, IBS augmentation of `.kin0`, first-degree-pair filter (`related`), KING-vs-IBS correlation plot.
+6. **Per-group reference files** (`per_group.sh`, 3×) — 15 sections mirroring the original pipeline order. Highlights: per-group afreq, PCA + overlays (wSex / wGait wholePop-only, wBook_Size / wCOI all groups), FST book-size-within-gait, per-group F_SNP `.het`, per-group bcftools roh + L1/L2/L3 + consensus ROH (nested over book-size for Trotter/Pacer), F_ROH summary, per-group GRM + ROHRM + analysis_comparison across all `$ROH_CUTOFFS`, `related_${rg}` filter, PCA pairwise Euclidean + KING merge + correlation plots, cross-method correlation plot, and COI-vs-F_ROH / F_ROH-vs-D_ROH / F_SNP-vs-D_ROH / F_SNP-vs-F_ROH doubleAnn plots.
+7. **Cross-group aggregation** (`aggregate.sh`) — twoGait and threeBooksize per-sample ROH_sh concatenations, F_ROH histograms + `roh_high.csv` + gait / book-size stratified F_ROH summaries, Froh-vs-ROHsh plots iterating wholePop / twoGait / threeBooksize, merged-kin-sorted-top cross-reference.
 8. **Upload** — `rclone` is invoked throughout each subscript; there's no single upload phase.
 
 ### Python Scripts (`scripts/`)
@@ -122,20 +127,35 @@ Google Drive (rclone download)
   ↓
 genDiversity_shared.sh  (runs once)
   PLINK preprocessing → QC & filtering → LD pruning
-  → bcftools roh on whole-pop phased VCF → L1/L2/L3 filter → per-base consensus
-  → effective_autosomal_genome_length.txt
-  → whole-pop plink2 --het (F_SNP seed)
+  → A_e (whole-pop + gait + gait×book-size) + FST (sex / gait / book-size)
+  → effective_autosomal_genome_length.txt + autosomes.genome
+  → whole-pop KING + IBS + related + KING-vs-IBS correlation plot
   → preprocess/samples.{wholePop,Trotter,Pacer}.txt + sample_groups.tsv
   ↓
 genDiversity_per_group.sh  (runs 3× — wholePop, Trotter, Pacer)
-  plink2 --pca (+ wSex/wGait/wBook_Size/wCOI overlays, wholePop extras)
-  → FST book-size-within-gait (Trotter/Pacer)
-  → pruned.${rg}.afreq  → filtered.LD_prune.het_stats.${rg}.het (via --read-freq)
-  → bcftools roh on group-subset VCF → roh_summary_by_RG_L3_Froh.${rg}.txt
-  → plink2 --make-rel (group GRM) + ROHRM_Creator.py (group ROHRM)
-  → analysis_comparison.py → Inbreeding_Comparison.${rg}.csv + Pairwise_Differences.${rg}.csv
+  §1  pruned.${rg}.afreq
+  §2  plink2 --pca (+ wSex/wGait/wBook_Size/wCOI overlays; wholePop adds PC outlier CSVs)
+  §3  FST book-size-within-gait (Trotter/Pacer)
+  §4  filtered.LD_prune.het_stats.${rg}.het (via --read-freq)
+  §5  PCA COI overlay using per-group .het
+  §6  bcftools roh on group-subset VCF + L1/L2/L3 filter chain
+  §7  per-base consensus ROH (wholePop alone, or gait + 3 book-size subs)
+  §8  roh_summary_by_RG_L3_Froh.${rg}.txt (F_ROH summary)
+  §9  per-group GRM + ROHRM + analysis_comparison at every $ROH_CUTOFFS cutoff
+      → Inbreeding_Comparison.${rg}.csv + Pairwise_Differences.${rg}.csv
+  §10 related_${rg} (gait-filtered first-degree pair list)
+  §11 PCA pairwise Euclidean distance
+  §12 Euclidean + KING merge
+  §13 Euclidean vs KING kinship correlation plot
+  §14 cross-method correlation plot (ROHRM vs KING vs PCA)
+  §15 F_SNP / F_ROH / D_STD / D_ROH / ROH_sh correlation plots (--mode froh,
+      --mode froh-cons, and four doubleAnn plots)
   ↓
-genDiversity.sh  (still inline — wholePop KING / IBS / Euclidean / correlation plots)
+genDiversity_aggregate.sh  (runs once)
+  → twoGait / threeBooksize per-sample ROH_sh concatenations
+  → F_ROH histograms + roh_high.csv + gait/book-size stratified F_ROH summaries
+  → Froh-vs-ROHsh plots (wholePop / twoGait / threeBooksize)
+  → merged-kin top-pair cross-reference
   ↓
 Google Drive (rclone upload — interleaved, not a dedicated phase)
 ```
@@ -160,17 +180,22 @@ A fresh clone of `genDiv` alone will fail early with path errors. `REFACTORING.m
 
 ### GPA per-group reference files
 
-The `per_group.sh` stage produces the deliverables consumed by the downstream GPA report pipeline (`../GPA/create_popFiles.sh`):
+`per_group.sh` produces deliverables consumed by the downstream GPA report pipeline (`../GPA/create_popFiles.sh`). The authoritative contract — filenames, schemas, column indices, and the per-file table of "numerically equivalent to today vs genuinely new content" — lives in **`MIGRATION.md`**. Any change to a producer or a consumer must update MIGRATION.md in the same PR.
+
+Quick summary of the eight per-group files:
 
 | File | Location | Purpose |
 |---|---|---|
 | `pruned.${rg}.afreq` | `LD_pruned/` | group-specific allele frequencies (feeds `--read-freq`) |
 | `filtered.LD_prune.het_stats.${rg}.het` | `divStats/` | F_SNP het reference, computed with group AF |
 | `roh_summary_by_RG_L3_Froh.${rg}.txt` | `divStats/` | F_ROH reference (bcftools roh on group-subset VCF) |
-| `Inbreeding_Comparison.${rg}.csv` | `rep_ROHRM/roh_1Mb.Threshold_3SD/` | D_SNP (col idx 1) + D_ROH (col idx 2), IID,D_STD,D_ROH,Phenotype |
-| `Pairwise_Differences.${rg}.csv` | `rep_ROHRM/roh_1Mb.Threshold_3SD/` | G_SNP (col idx 4) + G_ROH (col idx 5), ID1,ID2,Pheno1,Pheno2,Kinship_Std,Kinship_ROH,Difference |
+| `roh.L3.consensus_25pct.merged.${rg}.smoothed.bed` | `divStats/` | Consensus ROH regions from the group's own ROH calls |
+| `roh.L3.perSample_intersect_${rg}_consensus_25pct.summary.txt` | `divStats/` | ROH_sh per sample against the group's consensus |
+| `Inbreeding_Comparison.${rg}.csv` | `rep_ROHRM/roh_1Mb.Threshold_3SD/` | D_SNP (col idx 1) + D_ROH (col idx 2); header `IID,D_STD,D_ROH,Phenotype` |
+| `Pairwise_Differences.${rg}.csv` | `rep_ROHRM/roh_1Mb.Threshold_3SD/` | G_SNP (col idx 4) + G_ROH (col idx 5); header `ID1,ID2,Pheno1,Pheno2,Kinship_Std,Kinship_ROH,Difference` |
+| `sample_groups.tsv` | `preprocess/` | Global sample → primary-group map (one row per sample) |
 
-GPA reads by fixed column index — any schema drift breaks the report silently. Keep `analysis_comparison.py` column orderings stable.
+Every file follows the strict `<stem>.${rg}.<ext>` convention — wholePop outputs carry `.wholePop.` like Trotter and Pacer carry their own tags. `scripts/validate_popRefs.sh --mode upstream --root $OUTPUT_DIR` enforces the filename / header / row-count contract at the end of each run.
 
 ## Key Parameters & Thresholds
 
