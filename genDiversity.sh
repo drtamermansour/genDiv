@@ -245,25 +245,6 @@ rclone -v copy $out_prefix.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_
 
 
 awk -v aut_len=$aut_len 'BEGIN{FS=OFS="\t";}NR==1{print $0,"F_ROH";next} {print $0, ($3*1000)/aut_len}' ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.txt > ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.txt
-awk -v size=0.02 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($5/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(tail -n+2 ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.txt) > ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.histo 
-rclone -v copy ${OUTPUT_DIR}/divStats  --drive-shared-with-me --include "roh_summary_by_RG_L3_Froh.*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/"
-
-awk '{if($5>0.3)print $0}' ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.txt | tr '\t' ',' > ${OUTPUT_DIR}/divStats/roh_high.csv
-rclone -v copy ${OUTPUT_DIR}/divStats/roh_high.csv  --drive-shared-with-me "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/"
-
-## Summary stats of all ROH metrics Stratified by the gait type
-awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {if(gait[$1])print $0,gait[$1];else print $0,"undefined";}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.txt > ${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.txt
-INPUT_ROH="${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.txt"
-OUTPUT_FILE="${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.sumStats.csv"
-python scripts/summary_roh.py -i "$INPUT_ROH" -o "$OUTPUT_FILE" -n 4
-# Summary saved to ${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.sumStats.csv
-
-## Summary stats of all ROH metrics Stratified by book size for each gait type
-awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {if(gait[$1])print $0,gait[$1];else print $0,"undefined";}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.txt > ${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.txt
-INPUT_ROH="${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.txt"
-OUTPUT_FILE="${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.sumStats.csv"
-python scripts/summary_roh.py -i "$INPUT_ROH" -o "$OUTPUT_FILE" -n 4
-# Summary saved to ${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.sumStats.csv
 
 ## Froh-vs-ROHsh plots moved to genDiversity_aggregate.sh; they consume the
 ## twoGait / threeBooksize concatenations produced there.
