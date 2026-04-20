@@ -73,7 +73,7 @@ mkdir -p "$target_dir/preprocess" "$target_dir/filtered" "$target_dir/LD_pruned"
 pick_n() {
     local src="$1" n="$2"
     awk 'NF>=2 {print $1"\t"$2}' "$src" \
-        | awk -v s="$seed" 'BEGIN{srand(s)} {print rand(), $0}' \
+        | awk -v s="$seed" 'BEGIN{srand(s); OFS="\t"} {print rand(), $0}' \
         | sort -k1,1n \
         | head -n "$n" \
         | cut -f2-
