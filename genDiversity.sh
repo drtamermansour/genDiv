@@ -17,6 +17,7 @@ pl1_filtered="${OUTPUT_DIR}/filtered/USTA_Diversity_Study.remap.refAlleles.dedup
 vcf_filtered="${OUTPUT_DIR}/filtered/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.vcf"
 pl1_pruned="${OUTPUT_DIR}/LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.norm.phased.LD_prune"
 vcf_pruned="${OUTPUT_DIR}/LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.norm.phased.LD_prune.vcf"
+aut_len=$(cat "${OUTPUT_DIR}/divStats/effective_autosomal_genome_length.txt")
 
 ############## Stats on diversity ##################
 log "Section 5: Diversity statistics"
@@ -450,51 +451,6 @@ END {
 rclone -v copy $rohrm_dir/Filtered_ROH_Subpop_Stats.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
 #python $scripts/ROH_analysis_withFilter.py filtered.norm.phased.vcf.gz phenotypes.txt $roh_mb_cutoff > Filtered_ROH_analysis.$roh_mb_cutoff.log
 
-##########################################
-# 4E. ROH using bcftools/roh (Filtered dataset without LD pruning) -- This is the final approved approach
-##########################################
-## Run bcftools roh
-bcftools roh -G30 --estimate-AF - $vcf_filtered.norm.phased.vcf.gz -o ${OUTPUT_DIR}/divStats/roh_out.txt
-##Number of target samples: 560
-##Number of --estimate-AF samples: 560
-##Number of sites in the buffer/overlap: unlimited
-##Number of lines total/processed: 57829/57829 (old: 58106/58106)
-##Number of lines ${OUTPUT_DIR}/filtered/no AF/no alt/multiallelic/dup: 0/0/0/0/0
-
-grep -E "^RG|^#" ${OUTPUT_DIR}/divStats/roh_out.txt > ${OUTPUT_DIR}/divStats/roh_out_RG.txt
-## Summary stats by RG
-awk 'BEGIN{print "IID\tNSEG\tKB\tKBAVG"} $1=="RG"{n[$2]++; sum[$2]+=$6} END{for (s in n) printf "%s\t%d\t%.2f\t%.2f\n", s, n[s], sum[s]/1000, (sum[s]/1000)/n[s]}' ${OUTPUT_DIR}/divStats/roh_out_RG.txt > ${OUTPUT_DIR}/divStats/roh_summary_by_RG.txt
-awk 'NR > 1{ sum2 += $2; sum3 += $3; sum4 += $4 } END \
-    { count = NR - 1; printf "Average Number of runs of homozygosity (NSEG) : %.2f\n \
-    Average of the total length of runs (kb) across all samples: %.2f\n \
-    Average of the average length of runs (KBAVG) across all samples: %.2f\n", \
-    sum2/count, sum3/count, sum4/count }' ${OUTPUT_DIR}/divStats/roh_summary_by_RG.txt
-##Average Number of runs of homozygosity (NSEG) : 86.53
-##Average of the total length of runs (kb) across all samples: 456,016.51
-##Average of the average length of runs (KBAVG) across all samples: 5,256.67
-
-## filtration to match the PLINK quality suggestions 
-#Minimum ROH length (--homozyg-kb) 1000 kb
-awk '/^#/ || $6 >= 1000000' ${OUTPUT_DIR}/divStats/roh_out_RG.txt > ${OUTPUT_DIR}/divStats/roh.L1.txt
-#Minimum number of SNPs in ROH (--homozyg-snp) 50
-awk '/^#/ || $7 >= 50' ${OUTPUT_DIR}/divStats/roh.L1.txt > ${OUTPUT_DIR}/divStats/roh.L2.txt
-#Quality scores
-awk -v size=2 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($8/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(grep -v "^#" ${OUTPUT_DIR}/divStats/roh.L2.txt) > ${OUTPUT_DIR}/divStats/roh.L2.histo 
-awk '/^#/ || $8 >= 20' ${OUTPUT_DIR}/divStats/roh.L2.txt > ${OUTPUT_DIR}/divStats/roh.L3.txt
-
-## Summary stats by RG after QC filtration && Stratify the file by the gait type
-## The stats will be recalculated again later with Froh using "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.txt"
-awk 'BEGIN{print "IID\tNSEG\tKB\tKBAVG"} $1=="RG"{n[$2]++; sum[$2]+=$6} END{for (s in n) printf "%s\t%d\t%.2f\t%.2f\n", s, n[s], sum[s]/1000, (sum[s]/1000)/n[s]}' ${OUTPUT_DIR}/divStats/roh.L3.txt > ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.txt
-awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {if(gait[$1])print $0,gait[$1];else print $0,"undefined";}' ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.txt > ${OUTPUT_DIR}/divStats/roh.L3_gait.txt
-INPUT_ROH="${OUTPUT_DIR}/divStats/roh.L3_gait.txt"
-OUTPUT_FILE="${OUTPUT_DIR}/divStats/roh.L3_gait.sumStats.csv"
-python scripts/summary_roh.py -i "$INPUT_ROH" -o "$OUTPUT_FILE"
-rclone -v copy ${OUTPUT_DIR}/divStats/roh.L3_gait.sumStats.csv "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
-#Subgroup,          N,      NSEG,           KB,                         KBAVG
-#Whole Population,  560,    54.58 +/- 9.43, 413086.61 +/- 103171.97,    7533.22 +/- 1210.63
-#Pacer,             271,    50.34 +/- 7.11, 379860.14 +/- 81886.48,     7535.88 +/- 1224.94
-#Trotter,           271,    59.28 +/- 9.02, 451519.43 +/- 105452.45,    7580.75 +/- 1166.36
-#undefined,         18,     47.67 +/- 11.92,334702.03 +/- 138748.03,    6777.52 +/- 1454.36
 
 
 ## Rscript that plots the correlation between KB and KBAVG from .hom.indiv and the difference O(HET) and E(HET), and F columns from .het
@@ -505,113 +461,6 @@ out_prefix="${OUTPUT_DIR}/divStats/filtered.not_pruned.roh_summary_by_RG_L3"
 Rscript scripts/correlation_plot.R --mode basic $roh_indiv $het_stats $out_prefix
 rclone -v copy $out_prefix.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
 
-## A per-base consensus ROH where ≥25% of samples are in ROH filtered by minimum size 500 kb and stratified by gait type
-## With and without applying a smoothing function to the per-base coverage data to reduce noise before identifying consensus ROH regions
-#roh_RG=${OUTPUT_DIR}/divStats/roh_out_RG
-roh_RG=${OUTPUT_DIR}/divStats/roh.L3
-# 1. Convert RG output → BED format
-awk 'BEGIN{OFS="\t"} $1=="RG" {print $3, $4-1, $5, $2}' "${roh_RG}.txt" > "${roh_RG}.bed"
-# 2. Ensure ROHs from the same sample do not double-count
-cut -f4 "${roh_RG}.bed" | sort -u | while read S; do
-  awk -v s="$S" '$4==s' "${roh_RG}.bed" | sort -k1,1 -k2,2n | bedtools merge -i - | awk -v s="$S" 'BEGIN{OFS="\t"}{print $1,$2,$3,s}'
-done | sort -k1,1 -k2,2n > "${roh_RG}.merged_per_sample.wholePop.bed"
-
-# subset the bed file for each subpopulation
-for rg in "Trotter" "Pacer" "Trotter_LOW" "Trotter_MEDIUM" "Trotter_HIGH" "Pacer_LOW" "Pacer_MEDIUM" "Pacer_HIGH"; do 
-    grep "$rg" ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize | cut -f2 | grep -f - "${roh_RG}.merged_per_sample.wholePop.bed" > "${roh_RG}.merged_per_sample.${rg}.bed"
-done
-
-# 3. Calculate per-base ROH frequency (i.e., how many samples are in ROH at each base position)
-awk '$1 ~ /^[0-9]+$/' $reference_fai | awk 'BEGIN{OFS="\t"}{print "chr"$1,$2}' > ${OUTPUT_DIR}/divStats/autosomes.genome
-for rg in "wholePop" "Trotter" "Pacer" "Trotter_LOW" "Trotter_MEDIUM" "Trotter_HIGH" "Pacer_LOW" "Pacer_MEDIUM" "Pacer_HIGH"; do 
-    bedtools genomecov -i "${roh_RG}.merged_per_sample.${rg}.bed" -g ${OUTPUT_DIR}/divStats/autosomes.genome -bg > "${roh_RG}.per_base_coverage.${rg}.bed"
-    awk -v size=5 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($4/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
-                      END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  "${roh_RG}.per_base_coverage.${rg}.bed" > "${roh_RG}.per_base_coverage.${rg}.histo"
-    # upload bed files
-    # pause for now to save space
-    #rclone -v copy ${roh_RG}.per_base_coverage.${rg}.bed "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/freq/" --drive-shared-with-me
-
-    # upload histo files
-    rclone -v copy ${roh_RG}.per_base_coverage.${rg}.histo "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/freq/" --drive-shared-with-me
-done
-
-# 4. Identify consensus ROH regions (≥25% of samples in ROH) and merge adjacent regions (minimum size 500 kb)
-# With and without appling a smoothing function which adjust the per-base coverage value of regions briding intervals with high coverage. The function would assign the average coverage of the region and two flanking regions to the bridged interval.
-for rg in "wholePop" "Trotter" "Pacer" "Trotter_LOW" "Trotter_MEDIUM" "Trotter_HIGH" "Pacer_LOW" "Pacer_MEDIUM" "Pacer_HIGH"; do
-  num_samples=$(cut -f4 "${roh_RG}.merged_per_sample.${rg}.bed" | sort -u | wc -l)
-  threshold=$(echo "$pct * $num_samples / 100" | bc -l)
-  ## Find consensus before smoothing
-  awk -v threshold=$threshold 'BEGIN{OFS="\t"} $4 >= threshold {print}' "${roh_RG}.per_base_coverage.${rg}.bed" > "${roh_RG}.consensus_${pct}pct.${rg}.bed"
-  bedtools merge -i "${roh_RG}.consensus_${pct}pct.${rg}.bed" -c 4 -o mean | awk -v min_mb=$CONSENSUS_MIN_MB 'BEGIN{FS=OFS="\t"}{size=($3-$2)/1000000;if(size>=min_mb)print $0,size}' > "${roh_RG}.consensus_${pct}pct.merged.${rg}.bed"
-
-  # Summary stats of consensus ROH regions
-  echo "==== consensus ROH in ≥${pct}% of ${rg} samples BEFORE SMOOTHING ======"
-  awk -v rg="$rg" -v nsam="$num_samples" 'BEGIN{OFS=",";maxConsen=0;sumSamples=0;sumLen=0;} {if(maxConsen<$4)maxConsen=$4; sumSamples += $4; sumLen += $5} END \
-    {print rg,"\nNo. of segments","Total length (KB)","Ave. length (KB)","Max % of samples in consensus","Average % of samples in consensus",\
-    "\n"NR,sumLen,sumLen/NR,(maxConsen/nsam)*100"%",((sumSamples/NR)/nsam)*100"%"}' "${roh_RG}.consensus_${pct}pct.merged.${rg}.bed"
-
-  # Smooth per-base coverage: only average a middle interval if it exactly bridges two adjacent intervals
-  # and both flanking intervals are >= threshold while the middle < threshold.
-  awk -v thr="$threshold" 'BEGIN{OFS="\t"} {chr[NR]=$1; st[NR]=$2; en[NR]=$3; cov[NR]=$4} END{
-      for(i=1;i<=NR;i++){
-          newcov=cov[i]
-          if(i>1 && i<NR){
-              # check perfect contiguity: prev_end == cur_start && cur_end == next_start
-              if(en[i-1]==st[i] && en[i]==st[i+1]){
-                  if(cov[i-1] >= thr && cov[i+1] >= thr && cov[i] < thr){
-                      newcov = (cov[i-1] + cov[i] + cov[i+1]) / 3
-                  }
-              }
-          }
-          printf "%s\t%d\t%d\t%.6f\n", chr[i], st[i], en[i], newcov
-      }
-  }' "${roh_RG}.per_base_coverage.${rg}.bed" | awk 'BEGIN{OFS="\t"}{$4=$4+0;print}' > "${roh_RG}.per_base_coverage.${rg}.smoothed.bed"
-  # Generate new consensus using the smoothed per-base coverage
-  awk -v threshold="$threshold" 'BEGIN{OFS="\t"} $4 >= threshold {print}' "${roh_RG}.per_base_coverage.${rg}.smoothed.bed" > "${roh_RG}.consensus_${pct}pct.${rg}.smoothed.bed" ## recovered 72 more regions for wholePop
-  bedtools merge -i "${roh_RG}.consensus_${pct}pct.${rg}.smoothed.bed" -c 4 -o mean | awk -v min_mb=$CONSENSUS_MIN_MB 'BEGIN{FS=OFS="\t"}{size=($3-$2)/1000000;if(size>=min_mb)print $0,size}' > "${roh_RG}.consensus_${pct}pct.merged.${rg}.smoothed.bed"
-  
-  # upload bed files
-  # pause for now to save space
-  #rclone -v copy ${roh_RG}.consensus_${pct}pct.merged.${rg}.bed "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
-  #rclone -v copy ${roh_RG}.consensus_${pct}pct.merged.${rg}.smoothed.bed "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
-
-  # Summary stats of consensus ROH regions
-  echo "==== consensus smoothed ROH in ≥${pct}% of ${rg} samples AFTER SMOOTHING ======"
-  awk -v rg="$rg" -v nsam="$num_samples" 'BEGIN{OFS=",";maxConsen=0;sumSamples=0;sumLen=0;} {if(maxConsen<$4)maxConsen=$4; sumSamples += $4; sumLen += $5} END \
-   {print rg,"\nNo. of segments","Total length (KB)","Ave. length (KB)","Max % of samples in consensus","Average % of samples in consensus",\
-    "\n"NR,sumLen,sumLen/NR,(maxConsen/nsam)*100"%",((sumSamples/NR)/nsam)*100"%"}' "${roh_RG}.consensus_${pct}pct.merged.${rg}.smoothed.bed"
- 
-done > ${roh_RG}.consensus_${pct}pct.summary.txt
-rclone -v copy ${roh_RG}.consensus_${pct}pct.summary.txt "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
-grep -A3 "AFTER SMOOTHING" ${roh_RG}.consensus_${pct}pct.summary.txt
-
-## intersect ROH regions of each sample aganist the consensus ROH regions (in each "rg")
-## Output: the census length and percentage in each sample (file for each "rg")
-roh_RG="${OUTPUT_DIR}/divStats/roh.L3"
-for rg in "wholePop" "Trotter" "Pacer" "Trotter_LOW" "Trotter_MEDIUM" "Trotter_HIGH" "Pacer_LOW" "Pacer_MEDIUM" "Pacer_HIGH"; do
-    consensus_bed=${roh_RG}.consensus_${pct}pct.merged.${rg}.smoothed.bed
-    consensus_size=$(awk 'BEGIN{sum=0} {sum+=($3-$2)} END {print sum}' ${consensus_bed})
-    bed_perSample="${roh_RG}.merged_per_sample.${rg}.bed"   ## no need to loop on ${rg} here. It should be the same if you always used "wholePop" 
-    echo -e "IID\tTotal_ROH_in_Consensus_region(bp)\tPercent_of_Consensus_ROH" > ${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt
-    cut -f4 "${bed_perSample}" | sort -u | while read S; do
-      awk -v s="$S" '$4==s' "${bed_perSample}" | sort -k1,1 -k2,2n | bedtools intersect -a stdin -b "${consensus_bed}" | awk -v s="$S" -v cs="$consensus_size" 'BEGIN{OFS="\t"}{size+=($3-$2)} END {print s, size, (size/cs)*100}'
-    done >> ${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt
-    #rclone -v copy ${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
-done
-
-## merge the intersection (ROH_share) with Trotter/Pacer consensus
-## ouput: the census length and percentage in each sample aganist its own gait consensus
-head -n1  ${roh_RG}.perSample_intersect_wholePop_consensus_${pct}pct.summary.txt > ${roh_RG}.perSample_intersect_twoGait_consensus_${pct}pct.summary.txt
-for rg in "Trotter" "Pacer";do 
-    tail -n+2 ${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt;
-done >> ${roh_RG}.perSample_intersect_twoGait_consensus_${pct}pct.summary.txt  
-
-## merge the intersection (ROH_share) with Trotter_booksize/Pacer_booksize consensus
-## ouput: the census length and percentage in each sample aganist its own gait_bookSize consensus
-head -n1  ${roh_RG}.perSample_intersect_wholePop_consensus_${pct}pct.summary.txt > ${roh_RG}.perSample_intersect_threeBooksize_consensus_${pct}pct.summary.txt
-for rg in "Trotter_LOW" "Trotter_MEDIUM" "Trotter_HIGH" "Pacer_LOW" "Pacer_MEDIUM" "Pacer_HIGH";do 
-    tail -n+2 ${roh_RG}.perSample_intersect_${rg}_consensus_${pct}pct.summary.txt;
-done >> ${roh_RG}.perSample_intersect_threeBooksize_consensus_${pct}pct.summary.txt  
 
 ############################################
 ## 5. F_ROH statistic (currently calculated based on bacftools roh)
@@ -620,13 +469,6 @@ done >> ${roh_RG}.perSample_intersect_threeBooksize_consensus_${pct}pct.summary.
 ## Standard practice is to calculate F_{ROH} statistics on all valid ROHs (>1Mb), while restricting "Islands" (signatures of selection) to only the most robust regions.
 ## per-sample F_ROH = (sum length of ROH for that individual) / (total autosomal genome length).
 
-## calculate the effective autosomal genome length
-awk '{print $1"\t"$4}' "$pl1_filtered".bim | grep "^chr" | grep -v "^chrX" > "$pl1_filtered".snp_pos.txt
-aut_len=$(sort -k1,1 -k2,2n "$pl1_filtered".snp_pos.txt | \
-        awk '{if ($1 == prev_chr) { gap = $2 - prev_pos; \
-              if(gap > 0) {if (gap > 1000000) gap = 1000000; total += gap; }}\
-              prev_chr=$1; prev_pos=$2} END {print total}') ## 2,261,547,402
-echo $aut_len > ${OUTPUT_DIR}/divStats/effective_autosomal_genome_length.txt
 
 awk -v aut_len=$aut_len 'BEGIN{FS=OFS="\t";}NR==1{print $0,"F_ROH";next} {print $0, ($3*1000)/aut_len}' ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.txt > ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.txt
 awk -v size=0.02 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($5/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }'  <(tail -n+2 ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.txt) > ${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.histo 
