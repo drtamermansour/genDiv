@@ -20,8 +20,6 @@ vcf_pruned="${OUTPUT_DIR}/LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.
 aut_len=$(cat "${OUTPUT_DIR}/divStats/effective_autosomal_genome_length.txt")
 
 ## Per-group stage. Each invocation produces reference files for one group.
-## Currently a stub; subsequent commits move code here from the Section 5/6
-## blocks below.
 for rg in wholePop Trotter Pacer; do
     bash "$(dirname "$0")/genDiversity_per_group.sh" "$rg"
 done
@@ -35,22 +33,5 @@ done
 ##    With a SNP array, pi will be overestimated because it ignores the conserved (non-variable) parts of the genome (i.e., it is "SNP-based" diversity rather than a true "genomic" diversity.)
 
 
-
-## Section 6 relatedness (whole-pop GRM + ROHRM cutoff loop + analysis_comparison
-## + kinship-diff analysis) fully moved into per_group.sh §9. The wholePop
-## invocation reproduces today's whole-pop outputs under .wholePop. suffixes.
-
-
-
-
-## KING / IBS / PCA Euclidean / Euclidean-KING merge / cross-method correlation
-## plot all moved to shared.sh (one-shot whole-pop pieces) and per_group.sh
-## (per-group pieces). The merged_kin_sorted_top cross-reference moves to
-## aggregate.sh next commit.
-
-########################################################
-
-## Cross-group aggregation (currently a no-op stub; future commits will
-## move twoGait/threeBooksize summaries + Froh_vs_ROHsh plots + merged_kin_sorted_top
-## here from the inline Section 5/6 blocks above).
+## Cross-group aggregation.
 bash "$(dirname "$0")/genDiversity_aggregate.sh"
