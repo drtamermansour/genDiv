@@ -63,6 +63,8 @@ rclone -v copy "$pruned_afreq" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outp
 ##########################################
 ## 2. PCA + overlays
 ##########################################
+## PCAs are called "loadings" because they represent the weights or coefficients that 
+## determine how much each original variable "loads" onto or contributes to a specific PC.
 pca_prefix="${OUTPUT_DIR}/divStats/filtered.LD_prune${rg_tag}.pca"
 if [[ "$rg" == "wholePop" ]]; then
     plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
@@ -122,18 +124,22 @@ fi
 
 ########################################################
 ## 1. Effective number of alleles (\(A_{e}\))
-## A_e represents the number of equally frequent alleles required to achieve the same level of expected heterozygosity (\(H_{e}\)) observed in a population
-########################################################
+## A_e represents the number of equally frequent alleles required to achieve the 
+## same level of expected heterozygosity (\(H_{e}\)) observed in a population
 
+## Implementation note: The A_e is still implemented in the old design using wholePop to calculate all gait subpopulations stats
+########################################################
 ## Formula
-## \(A_{e} = \frac{1}{\sum p_{i}^{2}}\)
-## where \(p_{i}\) is the frequency of the \(i^{th}\) allele
+## A_e = 1/Σ p_i^2 per SNP
+## where (p_i) is the frequency of the (i^{th}) allele
 
 ## Example Calculation
 ## Suppose a single locus has three alleles with the observed frequencies (0.6, 0.3, 0.1) in a population.
 ## 1. Calculate the squared frequencies: 0.36, 0.09, and 0.01
 ## 2. Calculate \(A_{e}\): 1/(0.36 + 0.09 + 0.01) = 1/0.46 = 2.17
 ## This result means that although there are 3 distinct alleles, the population's genetic diversity is equivalent to a population with only 2.17 equally frequent alleles.
+
+## Calculate \(A_{e}\) for each SNP
 if [[ "$rg" == "wholePop" ]]; then
     ## Calculate \(A_{e}\) for each SNP
     plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
@@ -227,7 +233,8 @@ if [[ "$rg" != "wholePop" ]]; then
 fi
 
 ##########################################
-## 4. Heterozygosity (F_SNP) using group-specific AF via --read-freq
+## 4. Expected and observed heterozygosity and inbreeding coefficient (COI) -- aka (F_SNP) 
+## using group-specific AF via --read-freq ($pruned_afreq is now $rg dependanat)
 ##########################################
 het_rg_prefix="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.${rg}"
 plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
@@ -271,10 +278,11 @@ Rscript scripts/pca_plots.R "$pca_prefix" "$eigenvec_suffix" "$color_column" "$o
 rclone -v copy "$out_png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/PCA/" --drive-shared-with-me
 
 ##########################################
-## 6. bcftools roh + L1/L2/L3 filter (group-subset VCF so AF is group-specific)
+## 6. ROH using bcftools/roh (Filtered dataset without LD pruning) + L1/L2/L3 filter 
+## Implementation note: Calc using group-subset VCF so AF is group-specific
 ##########################################
-## For wholePop we use the whole-pop phased VCF directly; for Trotter / Pacer
-## we create a group-subset phased VCF that is ALSO reused by ROHRM in §9.
+## For wholePop, we use the whole-pop phased VCF directly; for Trotter / Pacer
+## We create a group-subset phased VCF that is ALSO reused by ROHRM in §9.
 if [[ "$rg" == "wholePop" ]]; then
     group_vcf="${vcf_filtered}.norm.phased.vcf.gz"
 else
@@ -313,9 +321,8 @@ fi
 ##########################################
 ## 7. Per-base consensus ROH (this group + its book-size subgroups)
 ##########################################
-## Build a per-sample merged bed from the group's own L3 ROH calls, then for
-## each "sub" of this group compute per-base ROH coverage, apply the ≥pct
-## threshold, merge/smooth, and intersect per-sample with the consensus.
+## A per-base consensus ROH where ≥25% of "group-specific" samples are in ROH filtered by minimum size 500 kb and stratified by gait type
+## With and without applying a smoothing function to the per-base coverage data to reduce noise before identifying consensus ROH regions
 ##
 ## Subgroups:
 ##   wholePop → just wholePop
@@ -347,13 +354,19 @@ else
 fi
 
 # 7.3 Per-base coverage + histograms + consensus threshold + smoothing + per-sample intersect
-# autosomes.genome produced once in shared.sh; reuse.
+# autosomes.genome (chromosome sizes table) produced once in shared.sh; reuse.
 {
 for sub in "${subs[@]}"; do
     bed_perSample="${roh_RG}.merged_per_sample.${sub}.bed"
     bedtools genomecov -i "$bed_perSample" -g "${OUTPUT_DIR}/divStats/autosomes.genome" -bg > "${roh_RG}.per_base_coverage.${sub}.bed"
     awk -v size=5 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($4/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
                           END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }' "${roh_RG}.per_base_coverage.${sub}.bed" > "${roh_RG}.per_base_coverage.${sub}.histo"
+
+    # upload bed files
+    # pause for now to save space
+    #rclone -v copy ${roh_RG}.per_base_coverage.${sub}.bed "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/freq/" --drive-shared-with-me
+
+    # upload histo files
     rclone -v copy "${roh_RG}.per_base_coverage.${sub}.histo" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/freq/" --drive-shared-with-me
 
     num_samples=$(cut -f4 "$bed_perSample" | sort -u | wc -l)
@@ -385,6 +398,11 @@ for sub in "${subs[@]}"; do
     awk -v threshold="$threshold" 'BEGIN{OFS="\t"} $4 >= threshold {print}' "${roh_RG}.per_base_coverage.${sub}.smoothed.bed" > "${roh_RG}.consensus_${pct}pct.${sub}.smoothed.bed"
     bedtools merge -i "${roh_RG}.consensus_${pct}pct.${sub}.smoothed.bed" -c 4 -o mean | awk -v min_mb=$CONSENSUS_MIN_MB 'BEGIN{FS=OFS="\t"}{size=($3-$2)/1000000;if(size>=min_mb)print $0,size}' > "${roh_RG}.consensus_${pct}pct.merged.${sub}.smoothed.bed"
 
+    # upload bed files
+    # pause for now to save space
+    #rclone -v copy ${roh_RG}.consensus_${pct}pct.merged.${sub}.bed "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
+    #rclone -v copy ${roh_RG}.consensus_${pct}pct.merged.${sub}.smoothed.bed "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
+
     echo "==== consensus smoothed ROH in ≥${pct}% of ${sub} samples AFTER SMOOTHING ======"
     awk -v rg="$sub" -v nsam="$num_samples" 'BEGIN{OFS=",";maxConsen=0;sumSamples=0;sumLen=0;} {if(maxConsen<$4)maxConsen=$4; sumSamples += $4; sumLen += $5} END \
      {print rg,"\nNo. of segments","Total length (KB)","Ave. length (KB)","Max % of samples in consensus","Average % of samples in consensus",\
@@ -402,11 +420,17 @@ for sub in "${subs[@]}"; do
     cut -f4 "$bed_perSample" | sort -u | while read S; do
         awk -v s="$S" '$4==s' "$bed_perSample" | sort -k1,1 -k2,2n | bedtools intersect -a stdin -b "$consensus_bed" | awk -v s="$S" -v cs="$consensus_size" 'BEGIN{OFS="\t"}{size+=($3-$2)} END {print s, size, (size/cs)*100}'
     done >> "${roh_RG}.perSample_intersect_${sub}_consensus_${pct}pct.summary.txt"
+    #rclone -v copy ${roh_RG}.perSample_intersect_${sub}_consensus_${pct}pct.summary.txt "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
 done
 
 ##########################################
-## 8. F_ROH summary (appends F_ROH column using shared effective genome length)
+## 8. F_ROH statistic and F_ROH summary
 ##########################################
+## F_ROH is an inbreeding coefficient based on runs of homozygosity
+## Standard practice is to calculate F_{ROH} statistics on all valid ROHs (>1Mb), while restricting "Islands" (signatures of selection) to only the most robust regions.
+## per-sample F_ROH = (sum length of ROH for that individual) / (total autosomal genome length).
+## "total autosomal genome length" was calculated in shared.sh
+
 awk -v aut_len="$aut_len" 'BEGIN{FS=OFS="\t";}NR==1{print $0,"F_ROH";next} {print $0, ($3*1000)/aut_len}' \
     "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.${rg}.txt" > "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.${rg}.txt"
 rclone -v copy "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.${rg}.txt" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/" --drive-shared-with-me
