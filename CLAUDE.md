@@ -76,7 +76,6 @@ Conceptual workflow phases:
 | Script | Purpose |
 |--------|---------|
 | `ROHRM_Creator.py` | Builds the ROH-based Relationship Matrix (ROHRM) — implements Howard et al. C++ logic in Python using window-based haplotype matching on phased VCF data |
-| `ROH_analysis.py` | ROH region identification and statistics from VCF files |
 | `analysis_comparison.py` | Compares ROHRM vs standard GRM; `RobustMatrixComparator` class |
 | `summary_roh.py` | ROH summary statistics grouped by subpopulation. `-n/--n-numeric-cols N` (default 3) controls how many numeric columns are summarised; the column right after the numeric block is the grouping factor |
 | `summary_het.py` | Heterozygosity summary stats (observed/expected, F-coefficients) |
