@@ -204,11 +204,12 @@ if [[ "$rg" == "wholePop" ]]; then
     subs=("wholePop")
 else
     subs=("$rg" "${rg}_LOW" "${rg}_MEDIUM" "${rg}_HIGH")
-    # Book-size subsets reuse this gait's per-sample bed, filtered to book-size membership
+    # Book-size subsets reuse this gait's per-sample bed, filtered to book-size membership.
+    # Tolerate grep's exit-1-when-no-match (small/absent subgroups) by truncating the output.
     for sub in "${rg}_LOW" "${rg}_MEDIUM" "${rg}_HIGH"; do
-        grep "$sub" "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize" | cut -f2 \
+        (grep "$sub" "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize" | cut -f2 \
             | grep -f - "${roh_RG}.merged_per_sample.${rg}.bed" \
-            > "${roh_RG}.merged_per_sample.${sub}.bed"
+            > "${roh_RG}.merged_per_sample.${sub}.bed") || : > "${roh_RG}.merged_per_sample.${sub}.bed"
     done
 fi
 
@@ -378,9 +379,13 @@ done
 ## sample appears. For wholePop the shared.sh file already covers the entire
 ## population, so no subsetting needed.
 if [[ "$rg" != "wholePop" ]]; then
-    grep "$rg" "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.${group}" | cut -f2 \
+    # grep may return 1 if either the gait file has no entries for this rg
+    # or the whole-pop "related" file has no first-degree pairs. Tolerate
+    # both — the resulting empty file just means this group had no related
+    # pairs above the KING>0.177 cutoff.
+    (grep "$rg" "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.${group}" | cut -f2 \
         | grep -Fwf - "${OUTPUT_DIR}/divStats/related" \
-        > "${OUTPUT_DIR}/divStats/related_${rg}"
+        > "${OUTPUT_DIR}/divStats/related_${rg}") || : > "${OUTPUT_DIR}/divStats/related_${rg}"
 fi
 
 ##########################################
