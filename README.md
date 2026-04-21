@@ -2,11 +2,7 @@
 
 This pipeline makes use of 500+ horses' genotyping data to assess genetic diversity in the population and create population-level reference ranges for future breeding programs.
 
-The pipeline is split across five bash files at the repo root (`genDiversity.sh` is the wrapper; `genDiversity_common.sh` holds shared CONFIG/helpers; `genDiversity_shared.sh`, `genDiversity_per_group.sh`, and `genDiversity_aggregate.sh` do the work). For architecture details (subscript responsibilities, data flow, parameter definitions) see [`CLAUDE.md`](./CLAUDE.md).
-
-Other docs in this repo:
-- [`MIGRATION.md`](./MIGRATION.md) — filename / schema contract between this pipeline and the downstream GPA report pipeline (`../GPA/`). Keep in sync whenever a producer or consumer changes.
-- [`REFACTORING.md`](./REFACTORING.md) — open suggestions and TODOs.
+The pipeline is split across five bash files at the repo root (`genDiversity.sh` is the wrapper; `genDiversity_common.sh` holds shared CONFIG/helpers; `genDiversity_shared.sh`, `genDiversity_per_group.sh`, and `genDiversity_aggregate.sh` do the work). 
 
 ## Environment
 
