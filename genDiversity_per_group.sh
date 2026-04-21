@@ -67,11 +67,13 @@ pca_prefix="${OUTPUT_DIR}/divStats/filtered.LD_prune${rg_tag}.pca"
 if [[ "$rg" == "wholePop" ]]; then
     plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
            --real-ref-alleles --autosome --pca 'allele-wts' \
+           --read-freq "$pruned_afreq" \
            --output-chr 'chrM' --out "$pca_prefix"
     n_pcs=6
 else
     plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
            --keep "$samples_rg" --autosome --pca \
+           --read-freq "$pruned_afreq" \
            --output-chr 'chrM' --out "$pca_prefix"
     n_pcs=3
 fi
