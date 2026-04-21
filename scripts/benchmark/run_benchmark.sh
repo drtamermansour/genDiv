@@ -105,6 +105,20 @@ if [[ -d "${source_dir}/Miscellaneous_documents_standardbred" ]]; then
     cp -r "${source_dir}/Miscellaneous_documents_standardbred" "${target_dir}/"
 fi
 
+# sample_groups.tsv — regenerated for the 50-sample subset. Matches the
+# format shared.sh writes: header + "IID\tgroup" rows, one per sample.
+# Samples without a gait label fall back to group=wholePop.
+if [[ ! -f "${target_dir}/preprocess/sample_groups.tsv" ]]; then
+    {
+        echo "# sample_groups.tsv — primary group per reference sample."
+        echo "# One row per sample; wholePop membership is implicit."
+        echo "# group ∈ {Trotter, Pacer, wholePop}. Samples with no gait label get group=wholePop."
+        printf "IID\tgroup\n"
+        awk 'BEGIN{FS=OFS="\t"} NR==FNR{gait[$2]=$3;next} {g=gait[$2]; if(g==""||g=="undefined") g="wholePop"; print $2,g}' \
+            "${target_dir}/preprocess/USTA_Diversity_Study.gait" "${target_dir}/preprocess/samples.wholePop.txt"
+    } > "${target_dir}/preprocess/sample_groups.tsv"
+fi
+
 ##############################################################################
 # 3. Subset PLINK1 filtered, PLINK1 pruned, and the phased VCF
 ##############################################################################

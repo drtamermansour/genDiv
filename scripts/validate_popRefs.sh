@@ -104,20 +104,23 @@ check_file() {
     local label="$1" path="$2" header_rx="$3" min_rows="$4"
     if [[ ! -f "$path" ]]; then
         fail_list+=("MISSING  $label  ($path)")
-        ((fail++))
+        fail=$((fail+1))
         return
     fi
     if [[ ! -s "$path" ]]; then
         fail_list+=("EMPTY    $label  ($path)")
-        ((fail++))
+        fail=$((fail+1))
         return
     fi
     if [[ -n "$header_rx" ]]; then
-        local hdr
-        hdr=$(head -n1 "$path")
-        if ! printf '%s' "$hdr" | grep -Eq "$header_rx"; then
-            fail_list+=("BAD_HEADER  $label  expected /$header_rx/  got: '$hdr'")
-            ((fail++))
+        # Scan the first 10 lines for any match. Handles both PLINK2 files
+        # where "#CHROM" is itself the header and files that emit a few
+        # "#"-commented lines before the real header (e.g. sample_groups.tsv).
+        if ! head -n 10 "$path" | grep -Eq "$header_rx"; then
+            local first
+            first=$(head -n1 "$path")
+            fail_list+=("BAD_HEADER  $label  expected /$header_rx/  (first line: '$first')")
+            fail=$((fail+1))
             return
         fi
     fi
@@ -126,11 +129,11 @@ check_file() {
         actual=$(wc -l < "$path" | tr -d ' ')
         if [[ "$actual" -lt "$min_rows" ]]; then
             fail_list+=("TOO_FEW_ROWS  $label  got=$actual expected>=$min_rows  ($path)")
-            ((fail++))
+            fail=$((fail+1))
             return
         fi
     fi
-    ((pass++))
+    pass=$((pass+1))
 }
 
 echo "Validating popRefs (--mode $mode --root $root)"
