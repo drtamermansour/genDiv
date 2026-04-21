@@ -2,8 +2,6 @@
 
 This pipeline makes use of 500+ horses' genotyping data to assess genetic diversity in the population and create population-level reference ranges for future breeding programs.
 
-The pipeline is split across five bash files at the repo root (`genDiversity.sh` is the wrapper; `genDiversity_common.sh` holds shared CONFIG/helpers; `genDiversity_shared.sh`, `genDiversity_per_group.sh`, and `genDiversity_aggregate.sh` do the work). 
-
 ## Environment
 
 Create a named conda/mamba environment (`genDiv`) containing every tool and package the pipeline invokes at runtime:
@@ -46,7 +44,7 @@ conda activate genDiv
 bash ./genDiversity.sh
 ```
 
-Each subscript is independently runnable, useful for refreshing just one stage:
+The pipeline is split across five bash files at the repo root (`genDiversity.sh` is the wrapper; `genDiversity_common.sh` holds shared CONFIG/helpers; `genDiversity_shared.sh`, `genDiversity_per_group.sh`, and `genDiversity_aggregate.sh` do the work). Each subscript is independently runnable, useful for refreshing just one stage:
 
 ```bash
 bash ./genDiversity_shared.sh
