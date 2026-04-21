@@ -8,7 +8,6 @@ This is a genomic diversity assessment pipeline for Standardbred horses (~500+ i
 
 See also:
 - `README.md` — human-oriented setup recipe (conda/mamba environment).
-- `REFACTORING.md` — open suggestions and TODOs collected while reviewing the codebase.
 - `MIGRATION.md` — the filename / schema contract between this pipeline and the downstream GPA report pipeline (`../GPA/`). Update it whenever a producer here or a consumer there changes.
 - `scripts/validate_popRefs.sh` — dual-mode validator for the per-group reference files; runs at end of the pipeline (and at end of GPA's `create_popFiles.sh` once the GPA-side PR lands).
 - `scripts/benchmark/run_benchmark.sh` — builds a 25-Trotter + 25-Pacer subset from an existing full-run `OUTPUT_DIR` and runs `per_group.sh × 3 + aggregate.sh` end-to-end for fast regression testing.
@@ -40,7 +39,7 @@ Uses conda/mamba with a named environment `genDiv`. Full setup command lives in 
 - CLI tools: `plink`, `plink2`, `bcftools`, `beagle`, `rclone`
 - Interpreters: `python` (with `numpy`, `pandas`, `scipy`, `matplotlib`, `seaborn`), `Rscript` (with `ggplot2`, `gridExtra`, `viridis`, `reshape2`, `GGally`, `effsize`)
 
-**In the env recipe but not currently invoked by the pipeline:** `gcta`, `bedtools`, `snakemake`. See `REFACTORING.md` §5 — decide whether to drop or wire in.
+**In the env recipe but not currently invoked by the pipeline:** `gcta`, `bedtools`, `snakemake`.
 
 ## Architecture
 
@@ -175,7 +174,7 @@ The pipeline also expects two sibling repositories and a configured rclone remot
 - `../Horse_parentage_SNPs/equCab3/download/equCab3.fa` + `equCab3_genome.fa.fai` — reference genome
 - `remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs` — rclone remote for input download and output upload
 
-A fresh clone of `genDiv` alone will fail early with path errors. `REFACTORING.md` §7 tracks a suggestion to validate these at script start.
+A fresh clone of `genDiv` alone will fail early with path errors.
 
 ### GPA per-group reference files
 

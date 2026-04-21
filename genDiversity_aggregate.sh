@@ -15,6 +15,15 @@ log "Cross-group aggregation stage"
 roh_RG="${OUTPUT_DIR}/divStats/roh.L3"
 
 ##########################################
+## FST statistics (needs all 3 per-group iterations done)
+##########################################
+## fst_stats.R reads all five FST summary files — three whole-pop ones
+## produced in per_group.sh wholePop §3a (sex / gait / bookSize) plus two
+## per-gait book-size ones produced in per_group.sh §3 for Trotter / Pacer.
+Rscript scripts/fst_stats.R "${OUTPUT_DIR}" &> ${OUTPUT_DIR}/divStats/fst_stats.txt
+rclone -v copy ${OUTPUT_DIR}/divStats/fst_stats.txt "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Fst/" --drive-shared-with-me
+
+##########################################
 ## Cross-group per-sample ROH_sh concatenations
 ##########################################
 ## twoGait   = Trotter + Pacer rows from each gait's own consensus-intersect file.

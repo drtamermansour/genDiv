@@ -17,7 +17,7 @@
 #     pair statistics and can't be subsetted from the 560-sample originals)
 #
 # What's copied verbatim from source:
-#   - preprocess/USTA_Diversity_Study.{gait,bookSize,gait_bookSize}
+#   - preprocess/USTA_Diversity_Study.{sex,gait,bookSize,gait_bookSize}
 #   - preprocess/sample_groups.tsv
 #   - divStats/effective_autosomal_genome_length.txt (reference-based constant)
 #   - divStats/autosomes.genome (reference-based constant)
@@ -94,7 +94,7 @@ echo "[$(date +%H:%M:%S)]   picked $(wc -l < "$target_dir/preprocess/samples.Tro
 ##############################################################################
 # 2. Copy reference-based constants and per-sample auxiliary files
 ##############################################################################
-for f in USTA_Diversity_Study.gait USTA_Diversity_Study.bookSize USTA_Diversity_Study.gait_bookSize sample_groups.tsv; do
+for f in USTA_Diversity_Study.sex USTA_Diversity_Study.gait USTA_Diversity_Study.bookSize USTA_Diversity_Study.gait_bookSize sample_groups.tsv; do
     if [[ -f "${source_dir}/preprocess/${f}" ]]; then
         cp "${source_dir}/preprocess/${f}" "${target_dir}/preprocess/${f}"
     fi
