@@ -26,52 +26,6 @@ for rg in wholePop Trotter Pacer; do
     bash "$(dirname "$0")/genDiversity_per_group.sh" "$rg"
 done
 
-############## Stats on diversity ##################
-log "Section 5: Diversity statistics"
-mkdir -p ${OUTPUT_DIR}/divStats
-
-
-
-##########################################
-## 3. Expected and observed heterozygosity and inbreeding coefficient
-##########################################
-## An inbreeding coefficient (COI) is a measure of the probability that an individual will have two copies of an allele that are identical by descent from a common ancestor.
-## A higher COI means more predictability of traits but also a greater risk of genetic health problems due to inbreeding depression
-
-## generate a summary table of heterozygosity and inbreeding coefficient in the two subpopulations and the whole cohort
-awk 'BEGIN{FS=OFS="\t";a["IID"]="Gait"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' \
-     ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.wholePop.het > ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait
-
-INPUT_HET="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait"
-OUTPUT_FILE="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait.sumStats.csv"
-python scripts/summary_het.py -i "$INPUT_HET" -o "$OUTPUT_FILE"
-
-## generate a summary table of heterozygosity and inbreeding coefficient in the three book size in the two subpopulations and the whole cohort
-awk 'BEGIN{FS=OFS="\t";a["IID"]="Gait"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' \
-     ${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.wholePop.het > ${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait_bookSize
-
-INPUT_HET="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait_bookSize"
-OUTPUT_FILE="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait_bookSize.sumStats.csv"
-python scripts/summary_het.py -i "$INPUT_HET" -o "$OUTPUT_FILE"
-
-rclone -v copy ${OUTPUT_DIR}/divStats --include "filtered.LD_prune.het_stats.wholePop.het*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/het_and_COI/" --drive-shared-with-me
-
-
-## Rscript that plots the correlation between KB and KBAVG from .hom.indiv and the difference O(HET) and E(HET), and F columns from .het
-## Similar analysis will be done later after calculation of related matrices
-roh_indiv="${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.wholePop.txt" ## to read KB and KBAVG
-het_stats="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.wholePop.het"        ## to read O(HET), E(HET), and F
-out_prefix="${OUTPUT_DIR}/divStats/filtered.not_pruned.roh_summary_by_RG_L3"
-Rscript scripts/correlation_plot.R --mode basic $roh_indiv $het_stats $out_prefix
-rclone -v copy $out_prefix.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
-
-
-## F_ROH statistic: whole-pop F_ROH summary is produced by per_group.sh wholePop
-## (roh_summary_by_RG_L3_Froh.wholePop.txt). Histograms, roh_high.csv, and
-## gait/book-size stratified summaries + Froh-vs-ROHsh plots live in
-## genDiversity_aggregate.sh.
-
-
 ############################################
 ## x. Nucleotide diversity statistic (pi) -- This section is under development
 ############################################

@@ -144,6 +144,30 @@ plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
 rclone -v copy "${het_rg_prefix}.het" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/het_and_COI/" --drive-shared-with-me
 
 ##########################################
+## 4b. Whole-pop .het × gait / gait_bookSize stratified summaries (wholePop only)
+##########################################
+## Joins the whole-pop per-sample .het (just produced above) with the global
+## gait / gait_bookSize metadata from shared.sh, then runs summary_het.py on
+## each stratification. Only uses wholePop inputs, so runs once.
+if [[ "$rg" == "wholePop" ]]; then
+    awk 'BEGIN{FS=OFS="\t";a["IID"]="Gait"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' \
+        "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait" "${het_rg_prefix}.het" \
+        > "${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait"
+    python scripts/summary_het.py \
+        -i "${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait" \
+        -o "${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait.sumStats.csv"
+
+    awk 'BEGIN{FS=OFS="\t";a["IID"]="Gait"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' \
+        "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize" "${het_rg_prefix}.het" \
+        > "${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait_bookSize"
+    python scripts/summary_het.py \
+        -i "${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait_bookSize" \
+        -o "${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait_bookSize.sumStats.csv"
+
+    rclone -v copy "${OUTPUT_DIR}/divStats" --include "filtered.LD_prune.het_stats.het.wGait*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/het_and_COI/" --drive-shared-with-me
+fi
+
+##########################################
 ## 5. PCA COI overlay (uses this group's own .het)
 ##########################################
 awk 'BEGIN{FS=OFS="\t";a["IID"]="COI"}NR==FNR{a[$2]=$8;next}{print $0,a[$2]}' <(tail -n+2 "${het_rg_prefix}.het") "$pca_prefix.eigenvec" > "$pca_prefix.eigenvec.wCOI"
@@ -176,6 +200,21 @@ awk '/^#/ || $8 >= 20'      "${OUTPUT_DIR}/divStats/roh.L2.${rg}.txt"    > "${OU
 ## Per-sample L3 counts (pre-F_ROH; F_ROH column appended in §8).
 awk 'BEGIN{print "IID\tNSEG\tKB\tKBAVG"} $1=="RG"{n[$2]++; sum[$2]+=$6} END{for (s in n) printf "%s\t%d\t%.2f\t%.2f\n", s, n[s], sum[s]/1000, (sum[s]/1000)/n[s]}' \
     "${OUTPUT_DIR}/divStats/roh.L3.${rg}.txt" > "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.${rg}.txt"
+
+##########################################
+## 6b. Whole-pop ROH-vs-het sanity-check correlation plot (wholePop only)
+##########################################
+## Basic pairplot correlating NSEG / KB / KBAVG (from roh_summary_by_RG_L3,
+## just produced above) with O(HET) / E(HET) / F (from §4's .het). Uses only
+## wholePop inputs.
+if [[ "$rg" == "wholePop" ]]; then
+    out_prefix="${OUTPUT_DIR}/divStats/filtered.not_pruned.roh_summary_by_RG_L3"
+    Rscript scripts/correlation_plot.R --mode basic \
+        "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3.${rg}.txt" \
+        "${het_rg_prefix}.het" \
+        "$out_prefix"
+    rclone -v copy "$out_prefix.pairplot.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
+fi
 
 ##########################################
 ## 7. Per-base consensus ROH (this group + its book-size subgroups)
@@ -279,6 +318,36 @@ awk -v aut_len="$aut_len" 'BEGIN{FS=OFS="\t";}NR==1{print $0,"F_ROH";next} {prin
 rclone -v copy "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.${rg}.txt" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/" --drive-shared-with-me
 
 ##########################################
+## 8b. Whole-pop F_ROH histogram, high-F_ROH shortlist, and gait / gait_bookSize
+##     stratified F_ROH summaries (wholePop only)
+##########################################
+## Only uses wholePop F_ROH + global metadata, so runs once.
+if [[ "$rg" == "wholePop" ]]; then
+    froh_wholePop="${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.${rg}.txt"
+
+    awk -v size=0.02 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($5/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }' \
+        <(tail -n+2 "$froh_wholePop") > "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.histo"
+    rclone -v copy "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.histo" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/" --drive-shared-with-me
+
+    awk '{if($5>0.3)print $0}' "$froh_wholePop" | tr '\t' ',' > "${OUTPUT_DIR}/divStats/roh_high.csv"
+    rclone -v copy "${OUTPUT_DIR}/divStats/roh_high.csv" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/" --drive-shared-with-me
+
+    awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {if(gait[$1])print $0,gait[$1];else print $0,"undefined";}' \
+        "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait" "$froh_wholePop" \
+        > "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.txt"
+    python scripts/summary_roh.py \
+        -i "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.txt" \
+        -o "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.sumStats.csv" -n 4
+
+    awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {if(gait[$1])print $0,gait[$1];else print $0,"undefined";}' \
+        "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize" "$froh_wholePop" \
+        > "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.txt"
+    python scripts/summary_roh.py \
+        -i "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.txt" \
+        -o "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.sumStats.csv" -n 4
+fi
+
+##########################################
 ## 9. GRM + ROHRM + analysis_comparison → D_SNP, G_SNP, D_ROH, G_ROH
 ##########################################
 ## Per-group standard GRM (vanRaden) via plink2 --make-rel + per-group ROHRM
@@ -370,6 +439,29 @@ for rohrm_mb in $ROH_CUTOFFS; do
     rclone -v copy "${subfolder}/Inbreeding_Comparison.${rg}.csv" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
     rclone -v copy "${subfolder}/Pairwise_Differences.${rg}.csv"  "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
 done
+
+##########################################
+## 9b. Top-pair cross-reference (ROHRM vs KING, wholePop only)
+##########################################
+## Canonicalize pair identities (a[1],a[2]) in each source, join on them, then
+## keep pairs where the ROHRM Kinship_Std column exceeds 0.1 — a quick "these
+## look genuinely related by both methods" shortlist. Uses only wholePop
+## Pairwise_Differences (§9 above) + whole-pop KING (shared.sh), so runs once.
+if [[ "$rg" == "wholePop" ]]; then
+    cat "${canonical_dir}/Pairwise_Differences.${rg}.csv" \
+        | sed 's/ID/IID/g' \
+        | awk 'BEGIN{FS=",";OFS="\t";}{a[1]=$1;a[2]=$2;asort(a);print a[1],a[2],$5,$6}' \
+        > "${OUTPUT_DIR}/divStats/tmp_kin1"
+    cat "$kingkin_wIBS" \
+        | awk 'BEGIN{FS=OFS="\t";}{a[1]=$2;a[2]=$4;asort(a);print a[1],a[2],$10,$11}' \
+        > "${OUTPUT_DIR}/divStats/tmp_kin2"
+    awk 'BEGIN{FS=OFS="\t";}NR==FNR{a[$1 FS $2]=$0;next}{if(a[$1 FS $2])print a[$1 FS $2],$3,$4}' \
+        "${OUTPUT_DIR}/divStats/tmp_kin1" "${OUTPUT_DIR}/divStats/tmp_kin2" \
+        > "${OUTPUT_DIR}/divStats/merged_kin"
+    head -n 1 "${OUTPUT_DIR}/divStats/merged_kin" > "${OUTPUT_DIR}/divStats/merged_kin_sorted_top"
+    tail -n +2 "${OUTPUT_DIR}/divStats/merged_kin" | sort -grk5,5 | awk '{if($5>0.1)print}' \
+        >> "${OUTPUT_DIR}/divStats/merged_kin_sorted_top"
+fi
 
 ##########################################
 ## 10. Per-gait "related" filter (Trotter / Pacer only)
