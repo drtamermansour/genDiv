@@ -530,10 +530,6 @@ for rohrm_mb in $ROH_CUTOFFS; do
         awk 'BEGIN{FS=","} !/Trotter/ && /Pacer/ {sum+=$8; n++} END{if(n)print "Ave diff Pacer-Pacer:", sum/n}' "${grp_workdir}/Pairwise_Differences.csv"
     fi
 
-    # Upload per-cutoff outputs under Relatedness/<subfolder-tail>/
-    subfolder_tail="$(basename "$subfolder")"
-    upload "${grp_workdir}/Robust_Matrix_Comparison_Enhanced.png" "Relatedness/${subfolder_tail}/"
-
     # Move csvs to the per-cutoff canonical dir with .${rg}. suffix; rename
     # remaining artifacts (matrix comparison png + histos) to carry .${rg}.
     mv "${grp_workdir}/Inbreeding_Comparison.csv" "${subfolder}/Inbreeding_Comparison.${rg}.csv"
@@ -545,8 +541,13 @@ for rohrm_mb in $ROH_CUTOFFS; do
         mv "${grp_workdir}/Robust_Matrix_Comparison_Enhanced.png" "${subfolder}/Robust_Matrix_Comparison_Enhanced.${rg}.png"
     fi
 
-    rclone -v copy "${subfolder}/Inbreeding_Comparison.${rg}.csv" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
-    rclone -v copy "${subfolder}/Pairwise_Differences.${rg}.csv"  "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/Howard_reimp/" --drive-shared-with-me
+    # Upload per-cutoff outputs under Relatedness/<subfolder-tail>/ with .${rg}. in filenames
+    subfolder_tail="$(basename "$subfolder")"
+    if [[ -f "${subfolder}/Robust_Matrix_Comparison_Enhanced.${rg}.png" ]]; then
+        upload "${subfolder}/Robust_Matrix_Comparison_Enhanced.${rg}.png" "Relatedness/${subfolder_tail}/"
+    fi
+    upload "${subfolder}/Inbreeding_Comparison.${rg}.csv" "Relatedness/${subfolder_tail}/"
+    upload "${subfolder}/Pairwise_Differences.${rg}.csv"  "Relatedness/${subfolder_tail}/"
 done
 
 ##########################################

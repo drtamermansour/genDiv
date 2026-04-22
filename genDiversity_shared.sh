@@ -465,6 +465,7 @@ log "Per-group sample lists: wholePop=$(wc -l < "${OUTPUT_DIR}/preprocess/sample
 ##########################################
 ## Effective autosomal genome length + autosomes.genome
 ##########################################
+mkdir -p "${OUTPUT_DIR}/divStats"
 ## calculate the effective autosomal genome length
 awk '{print $1"\t"$4}' "$pl1_filtered".bim | grep "^chr" | grep -v "^chrX" > "$pl1_filtered".snp_pos.txt
 aut_len=$(sort -k1,1 -k2,2n "$pl1_filtered".snp_pos.txt | \
