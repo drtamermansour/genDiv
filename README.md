@@ -47,9 +47,9 @@ bash ./genDiversity.sh
 The pipeline is split across five bash files at the repo root (`genDiversity.sh` is the wrapper; `genDiversity_common.sh` holds shared CONFIG/helpers; `genDiversity_shared.sh`, `genDiversity_per_group.sh`, and `genDiversity_aggregate.sh` do the work). Each subscript is independently runnable, useful for refreshing just one stage:
 
 ```bash
-bash ./genDiversity_shared.sh
-for rg in wholePop Trotter Pacer; do bash ./genDiversity_per_group.sh "$rg"; done
-bash ./genDiversity_aggregate.sh
+OUTPUT_DIR="Path to an output directory" bash ./genDiversity_shared.sh
+for rg in wholePop Trotter Pacer; do bash OUTPUT_DIR="Path to same output directory" ./genDiversity_per_group.sh "$rg"; done
+OUTPUT_DIR="Path to same output directory" bash ./genDiversity_aggregate.sh
 ```
 
 ## Validating outputs
