@@ -831,7 +831,7 @@ roh_indiv="${OUTPUT_DIR}/divStats/filtered.not_pruned.roh_$group.hom.indiv" ## t
 het_stats="${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het"        ## to read O(HET), E(HET), and F
 out_prefix="${OUTPUT_DIR}/divStats/filtered.not_pruned.roh_$group.hom"
 Rscript scripts/correlation_plot.R --mode basic $roh_indiv $het_stats $out_prefix
-rclone -v copy $out_prefix.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/plink_${OUTPUT_DIR}/filtered/" --drive-shared-with-me
+rclone -v copy $out_prefix.pairplot.png "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/plink_filtered/" --drive-shared-with-me
 
 ##########################################
 ## 4C. ROH using Plink (Filtered dataset without LD pruning (with group option))
