@@ -51,9 +51,9 @@ The pipeline is split across five bash files at the repo root:
 |---|---|---|
 | `genDiversity.sh` | Thin wrapper: sources common, runs shared → loops per_group × 3 → runs aggregate | `bash genDiversity.sh` |
 | `genDiversity_common.sh` | CONFIG, helpers (`log`, `run_python`, `run_r`, `upload`), `ERR` trap, log redirection (guarded by `GENDIV_LOG_SETUP` so subscripts don't double-log) | sourced |
-| `genDiversity_shared.sh` | Whole-pop preprocessing (Sections 1–3) + A_e + FST + effective-genome-length + autosomes.genome + whole-pop KING + IBS + `samples.{wholePop,Trotter,Pacer}.txt` + `sample_groups.tsv` | `bash genDiversity_shared.sh` |
+| `genDiversity_shared.sh` | Whole-pop preprocessing (Sections 1–3) + effective-genome-length + autosomes.genome + `samples.{wholePop,Trotter,Pacer}.txt` + `sample_groups.tsv` | `bash genDiversity_shared.sh` |
 | `genDiversity_per_group.sh` | Per-group metric stage; takes `$rg ∈ {wholePop, Trotter, Pacer}`, runs 3× | `bash genDiversity_per_group.sh <rg>` |
-| `genDiversity_aggregate.sh` | Cross-group summaries (twoGait / threeBooksize), F_ROH histograms + gait/book-size stratified summaries, Froh-vs-ROHsh plots, merged-kin top-pair cross-reference | `bash genDiversity_aggregate.sh` |
+| `genDiversity_aggregate.sh` | Cross-group: `fst_stats.R` over all five FST summaries, twoGait / threeBooksize ROH_sh concatenations, Froh-vs-ROHsh plots | `bash genDiversity_aggregate.sh` |
 
 All scripts respect `OUTPUT_DIR` as an env override, so re-running into an existing folder (e.g., to refresh just one group) works the same way as a fresh timestamped run.
 
@@ -64,11 +64,10 @@ Conceptual workflow phases:
 1. **Data Download & Preprocessing** (`shared.sh`) — rclone from Google Drive, PLINK ID updates, EquCab3 remapping, SNP deduplication, PLINK1→PLINK2 conversion.
 2. **Data Exploration** (`shared.sh`) — sex validation (X chr F-stats), PAR removal, HWE analysis.
 3. **Final Filtering** (`shared.sh`) — apply missingness/MAF/HWE thresholds to produce the clean dataset; LD pruning.
-4. **Whole-pop diversity metrics** (`shared.sh`) — A_e (effective-allele number, per SNP and stratified by gait and gait×book-size via `--loop-cats`), FST between subpopulations (sex / gait / book-size), effective autosomal genome length, autosomes.genome.
-5. **Whole-pop KING-robust kinship + IBS** (`shared.sh`) — plink2 `--make-king-table`, IBS augmentation of `.kin0`, first-degree-pair filter (`related`), KING-vs-IBS correlation plot.
-6. **Per-group reference files** (`per_group.sh`, 3×) — 15 sections mirroring the original pipeline order. Highlights: per-group afreq, PCA + overlays (wSex / wGait wholePop-only, wBook_Size / wCOI all groups), FST book-size-within-gait, per-group F_SNP `.het`, per-group bcftools roh + L1/L2/L3 + consensus ROH (nested over book-size for Trotter/Pacer), F_ROH summary, per-group GRM + ROHRM + analysis_comparison across all `$ROH_CUTOFFS`, `related_${rg}` filter, PCA pairwise Euclidean + KING merge + correlation plots, cross-method correlation plot, and COI-vs-F_ROH / F_ROH-vs-D_ROH / F_SNP-vs-D_ROH / F_SNP-vs-F_ROH doubleAnn plots.
-7. **Cross-group aggregation** (`aggregate.sh`) — twoGait and threeBooksize per-sample ROH_sh concatenations, F_ROH histograms + `roh_high.csv` + gait / book-size stratified F_ROH summaries, Froh-vs-ROHsh plots iterating wholePop / twoGait / threeBooksize, merged-kin-sorted-top cross-reference.
-8. **Upload** — `rclone` is invoked throughout each subscript; there's no single upload phase.
+4. **Whole-pop preprocessing tail** (`shared.sh`) — derives `effective_autosomal_genome_length.txt`, `autosomes.genome`, and per-group sample lists (`samples.${rg}.txt` + `sample_groups.tsv`) so `per_group.sh` can run.
+5. **Per-group reference files** (`per_group.sh`, 3×) — sections mirroring the original pipeline order. Highlights: per-group afreq, PCA + overlays (wSex / wGait wholePop-only, wBook_Size / wCOI all groups), A_e and whole-pop FST (wholePop-only), FST book-size-within-gait, per-group F_SNP `.het`, per-group bcftools roh + L1/L2/L3 + consensus ROH (nested over book-size for Trotter/Pacer), F_ROH summary, per-group GRM + ROHRM + analysis_comparison across all `$ROH_CUTOFFS`, per-group KING + IBS + `related.${rg}`, PCA pairwise Euclidean, cross-method correlation plot, and COI-vs-F_ROH / F_ROH-vs-D_ROH / F_SNP-vs-D_ROH / F_SNP-vs-F_ROH doubleAnn plots.
+6. **Cross-group aggregation** (`aggregate.sh`) — `fst_stats.R` over the five FST summaries, twoGait and threeBooksize per-sample ROH_sh concatenations, Froh-vs-ROHsh plots iterating wholePop / twoGait / threeBooksize.
+7. **Upload** — `rclone` is invoked throughout each subscript; there's no single upload phase.
 
 ### Python Scripts (`scripts/`)
 
@@ -125,9 +124,7 @@ Google Drive (rclone download)
   ↓
 genDiversity_shared.sh  (runs once)
   PLINK preprocessing → QC & filtering → LD pruning
-  → A_e (whole-pop + gait + gait×book-size) + FST (sex / gait / book-size)
   → effective_autosomal_genome_length.txt + autosomes.genome
-  → whole-pop KING + IBS + related + KING-vs-IBS correlation plot
   → preprocess/samples.{wholePop,Trotter,Pacer}.txt + sample_groups.tsv
   ↓
 genDiversity_per_group.sh  (runs 3× — wholePop, Trotter, Pacer)
@@ -141,19 +138,16 @@ genDiversity_per_group.sh  (runs 3× — wholePop, Trotter, Pacer)
   §8  roh_summary_by_RG_L3_Froh.${rg}.txt (F_ROH summary)
   §9  per-group GRM + ROHRM + analysis_comparison at every $ROH_CUTOFFS cutoff
       → Inbreeding_Comparison.${rg}.csv + Pairwise_Differences.${rg}.csv
-  §10 related_${rg} (gait-filtered first-degree pair list)
+  §10 per-group KING + IBS + related.${rg} (per-group --make-king-table)
   §11 PCA pairwise Euclidean distance
-  §12 Euclidean + KING merge
-  §13 Euclidean vs KING kinship correlation plot
   §14 cross-method correlation plot (ROHRM vs KING vs PCA)
   §15 F_SNP / F_ROH / D_STD / D_ROH / ROH_sh correlation plots (--mode froh,
       --mode froh-cons, and four doubleAnn plots)
   ↓
 genDiversity_aggregate.sh  (runs once)
+  → fst_stats.R (reads all 5 FST summaries: 3 whole-pop + 2 per-gait book-size)
   → twoGait / threeBooksize per-sample ROH_sh concatenations
-  → F_ROH histograms + roh_high.csv + gait/book-size stratified F_ROH summaries
   → Froh-vs-ROHsh plots (wholePop / twoGait / threeBooksize)
-  → merged-kin top-pair cross-reference
   ↓
 Google Drive (rclone upload — interleaved, not a dedicated phase)
 ```

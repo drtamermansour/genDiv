@@ -13,8 +13,8 @@
 #   - samples.${rg}.txt files (wholePop, Trotter, Pacer)
 #
 # What's regenerated on the subset:
-#   - whole-pop KING kinship + IBS augmentation + related (since these are
-#     pair statistics and can't be subsetted from the 560-sample originals)
+#   - per-group KING kinship + IBS + related are produced inside per_group.sh
+#     §10 (no benchmark-side recompute needed).
 #
 # What's copied verbatim from source:
 #   - preprocess/USTA_Diversity_Study.{sex,gait,bookSize,gait_bookSize}
@@ -138,23 +138,10 @@ bcftools view -S <(cut -f2 "$keep_file") --force-samples "$vcf_in" -Oz -o "$vcf_
 bcftools index -t "$vcf_out"
 
 ##############################################################################
-# 4. Regenerate whole-pop KING + IBS + related on the subset
+# 4. Run per_group.sh × 3 then aggregate.sh against the target OUTPUT_DIR
 ##############################################################################
-pl1_pruned="${target_dir}/${pl1_pruned_stem}"
-group="gait"
-plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
-    --make-king-table 'counts' 'cols=+ibs1' \
-    --output-chr 'chrM' --out "${target_dir}/divStats/filtered.LD_prune.king_${group}"
-kingkin="${target_dir}/divStats/filtered.LD_prune.king_${group}.kin0"
-awk -v size=0.05 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($10/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
-                    END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }' <(tail -n+2 "$kingkin") > "${kingkin%.kin0}.histo"
-head -n 1 "$kingkin" > "${target_dir}/divStats/related"
-tail -n +2 "$kingkin" | sort -grk10,10 | awk '{if($10>0.177)print}' >> "${target_dir}/divStats/related"
-awk 'BEGIN{FS=OFS="\t"}NR==1{print $0,"IBS";next}{ibs1=$8+$9;ibs2=$5-($6+$7+ibs1);print $0,(2*ibs2+ibs1)/(2*$5)}' "$kingkin" > "${kingkin}.withIBS"
-
-##############################################################################
-# 5. Run per_group.sh × 3 then aggregate.sh against the target OUTPUT_DIR
-##############################################################################
+## Per-group KING + IBS + related now produced inside per_group.sh §10 (no
+## longer regenerated here).
 cd "$repo_root"
 export OUTPUT_DIR="$target_dir"
 for rg in wholePop Trotter Pacer; do
@@ -166,7 +153,7 @@ echo "[$(date +%H:%M:%S)] === aggregate.sh ==="
 bash ./genDiversity_aggregate.sh
 
 ##############################################################################
-# 6. Validate
+# 5. Validate
 ##############################################################################
 echo "[$(date +%H:%M:%S)] === validate_popRefs.sh ==="
 bash scripts/validate_popRefs.sh --mode upstream --root "$target_dir"

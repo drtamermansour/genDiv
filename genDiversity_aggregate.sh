@@ -4,9 +4,8 @@
 # groups. Contains only the blocks that truly require all three per-group
 # runs: twoGait / threeBooksize per-sample concatenations, and the
 # Froh-vs-ROHsh plots that consume them. Per-group wholePop-only analyses
-# (F_ROH histograms, roh_high, gait/bookSize stratified summaries,
-# merged_kin top-pair) live in genDiversity_per_group.sh under the
-# if [[ "$rg" == "wholePop" ]] blocks.
+# (F_ROH histograms, roh_high, gait/bookSize stratified summaries) live in
+# genDiversity_per_group.sh under the if [[ "$rg" == "wholePop" ]] blocks.
 set -eo pipefail
 source "$(dirname "$0")/genDiversity_common.sh"
 

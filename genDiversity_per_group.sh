@@ -36,12 +36,7 @@ docs="$(pwd)/${OUTPUT_DIR}/Miscellaneous_documents_standardbred"
 samples_rg="${OUTPUT_DIR}/preprocess/samples.${rg}.txt"
 aut_len=$(cat "${OUTPUT_DIR}/divStats/effective_autosomal_genome_length.txt")
 
-## Whole-pop KING outputs produced by shared.sh; per_group.sh consumes these
-## for the per-gait related filter (§3.5 below) and for the Euclidean + KING
-## merge + cross-method correlation plot (§10–§11).
 group="gait"
-kingkin="${OUTPUT_DIR}/divStats/filtered.LD_prune.king_${group}.kin0"
-kingkin_wIBS="${kingkin}.withIBS"
 
 ## Strict GPA naming: every per-group file has ".${rg}." inserted before
 ## its extension, including for wholePop. Consumer update contract in
@@ -555,44 +550,72 @@ for rohrm_mb in $ROH_CUTOFFS; do
 done
 
 ##########################################
-## 9b. Top-pair cross-reference (ROHRM vs KING, wholePop only)
+## 10. Per-group KING-robust kinship + IBS + related
 ##########################################
-## Canonicalize pair identities (a[1],a[2]) in each source, join on them, then
-## keep pairs where the ROHRM Kinship_Std column exceeds 0.1 — a quick "these
-## look genuinely related by both methods" shortlist. Uses only wholePop
-## Pairwise_Differences (§9 above) + whole-pop KING (shared.sh), so runs once.
-if [[ "$rg" == "wholePop" ]]; then
-    cat "${canonical_dir}/Pairwise_Differences.${rg}.csv" \
-        | sed 's/ID/IID/g' \
-        | awk 'BEGIN{FS=",";OFS="\t";}{a[1]=$1;a[2]=$2;asort(a);print a[1],a[2],$5,$6}' \
-        > "${OUTPUT_DIR}/divStats/tmp_kin1"
-    cat "$kingkin_wIBS" \
-        | awk 'BEGIN{FS=OFS="\t";}{a[1]=$2;a[2]=$4;asort(a);print a[1],a[2],$10,$11}' \
-        > "${OUTPUT_DIR}/divStats/tmp_kin2"
-    awk 'BEGIN{FS=OFS="\t";}NR==FNR{a[$1 FS $2]=$0;next}{if(a[$1 FS $2])print a[$1 FS $2],$3,$4}' \
-        "${OUTPUT_DIR}/divStats/tmp_kin1" "${OUTPUT_DIR}/divStats/tmp_kin2" \
-        > "${OUTPUT_DIR}/divStats/merged_kin"
-    head -n 1 "${OUTPUT_DIR}/divStats/merged_kin" > "${OUTPUT_DIR}/divStats/merged_kin_sorted_top"
-    tail -n +2 "${OUTPUT_DIR}/divStats/merged_kin" | sort -grk5,5 | awk '{if($5>0.1)print}' \
-        >> "${OUTPUT_DIR}/divStats/merged_kin_sorted_top"
-fi
+## Computes KING on this group's own samples (--keep samples.${rg}.txt). Each
+## group gets its own pair-kinship space; for wholePop, --keep is the full
+## cohort so the output is numerically equivalent to the pre-refactor whole-pop
+## KING table. Produces: .${rg}.kin0 + .histo, related.${rg} (first-degree
+## relatives at KING>0.177), and .${rg}.kin0.withIBS (IBS-augmented kin0).
+king_prefix="${OUTPUT_DIR}/divStats/filtered.LD_prune.king_${group}.${rg}"
+plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
+    --keep "$samples_rg" \
+    --make-king-table 'counts' 'cols=+ibs1' \
+    --output-chr 'chrM' --out "$king_prefix"
+
+kingkin="${king_prefix}.kin0"
+awk -v size=0.05 'BEGIN{OFS="\t";bmin=bmax=0}{ b=int($10/size); a[b]++; bmax=b>bmax?b:bmax; bmin=b<bmin?b:bmin } \
+    END { for(i=bmin;i<=bmax;++i) print i*size,(i+1)*size,a[i]/1 }' <(tail -n+2 "$kingkin") > "${kingkin%.kin0}.histo"
+rclone -v copy "$kingkin" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+rclone -v copy "${kingkin%.kin0}.histo" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
+
+## Likely first-degree relations (per-group)
+head -n 1 "$kingkin" > "${OUTPUT_DIR}/divStats/related.${rg}"
+tail -n +2 "$kingkin" | sort -grk10,10 | awk '{if($10>0.177)print}' >> "${OUTPUT_DIR}/divStats/related.${rg}"
+
+## IBS augmentation of kin0: IBS1 = HET1_HOM2 + HET2_HOM1; IBS2 = N_SNPs - (HETHET + IBS0 + IBS1); IBS = (2*IBS2 + IBS1) / (2*N_SNPs).
+kingkin_wIBS="${kingkin}.withIBS"
+awk 'BEGIN{FS=OFS="\t"}NR==1{print $0,"IBS";next}{ibs1=$8+$9;ibs2=$5-($6+$7+ibs1);print $0,(2*ibs2+ibs1)/(2*$5)}' "$kingkin" > "$kingkin_wIBS"
 
 ##########################################
-## 10. Per-gait "related" filter (Trotter / Pacer only)
+## 11. PCA-based pairwise Euclidean distance
 ##########################################
-## shared.sh's "related" file is the whole-pop list of first-degree pairs
-## (KING kinship > 0.177). Here we keep just the rows where a gait-labeled
-## sample appears. For wholePop the shared.sh file already covers the entire
-## population, so no subsetting needed.
-if [[ "$rg" != "wholePop" ]]; then
-    # grep may return 1 if either the gait file has no entries for this rg
-    # or the whole-pop "related" file has no first-degree pairs. Tolerate
-    # both — the resulting empty file just means this group had no related
-    # pairs above the KING>0.177 cutoff.
-    (grep "$rg" "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.${group}" | cut -f2 \
-        | grep -Fwf - "${OUTPUT_DIR}/divStats/related" \
-        > "${OUTPUT_DIR}/divStats/related_${rg}") || : > "${OUTPUT_DIR}/divStats/related_${rg}"
-fi
+awk '
+BEGIN {FS=OFS="\t"}
+$1!="#FID" && NF>3 {
+    n++
+    fid[n]=$1
+    iid[n]=$2
+    for(c=3;c<=NF;c++) pc[n,c-2] = $c
+    npcs = NF - 2
+}
+END {
+    print "FID1","IID1","FID2","IID2","PCA_EUCLIDEAN_DIST","DIST_KINSHIP"
+    for(i=1;i<=n;i++)
+        for(j=1;j<i;j++) {
+            dist2=0
+            for(c=1;c<=npcs;c++) {
+                d = pc[i,c] - pc[j,c]
+                dist2 += d*d
+            }
+            dist = sqrt(dist2)
+            printf "%s\t%s\t%s\t%s\t%.8f\t%.8f\n",
+                fid[i], iid[i], fid[j], iid[j], dist, exp(-dist2/2)
+        }
+}
+' "$pca_prefix.eigenvec" > "$pca_prefix.pca_pairwise_euclidean.dist"
+
+##########################################
+## 14. Cross-method correlation plot (ROHRM vs KING vs PCA, per group)
+##########################################
+euclDist="$pca_prefix.pca_pairwise_euclidean.dist"
+out_prefix="${OUTPUT_DIR}/divStats/${rg}.relatedness_correlation"
+Rscript scripts/correlation_plot.R --mode pairwise \
+    "${canonical_dir}/Pairwise_Differences.${rg}.csv" \
+    "$kingkin_wIBS" \
+    "$euclDist" \
+    "$out_prefix"
+rclone -v copy "$out_prefix.pairplot.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
 
 ##########################################
 ## 15. F_SNP / F_ROH / D_STD / D_ROH / ROH_sh correlation plots
@@ -657,81 +680,3 @@ Rscript "$scripts/plot_correlation_withColorsAndShapes.R" "${OUTPUT_DIR}/divStat
     mv "${OUTPUT_DIR}/divStats/correlation_plot_F_SNP_vs_F_ROH_doubleAnn.png" "${OUTPUT_DIR}/divStats/correlation_plot_F_SNP_vs_F_ROH_doubleAnn${dbl_tag}.png"
 
 rclone -v copy "${OUTPUT_DIR}/divStats/correlation_plot_F_SNP_vs_F_ROH_doubleAnn${dbl_tag}.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
-
-##########################################
-## 11. PCA-based pairwise Euclidean distance
-##########################################
-awk '
-BEGIN {FS=OFS="\t"}
-$1!="#FID" && NF>3 {
-    n++
-    fid[n]=$1
-    iid[n]=$2
-    for(c=3;c<=NF;c++) pc[n,c-2] = $c
-    npcs = NF - 2
-}
-END {
-    print "FID1","IID1","FID2","IID2","PCA_EUCLIDEAN_DIST","DIST_KINSHIP"
-    for(i=1;i<=n;i++)
-        for(j=1;j<i;j++) {
-            dist2=0
-            for(c=1;c<=npcs;c++) {
-                d = pc[i,c] - pc[j,c]
-                dist2 += d*d
-            }
-            dist = sqrt(dist2)
-            printf "%s\t%s\t%s\t%s\t%.8f\t%.8f\n",
-                fid[i], iid[i], fid[j], iid[j], dist, exp(-dist2/2)
-        }
-}
-' "$pca_prefix.eigenvec" > "$pca_prefix.pca_pairwise_euclidean.dist"
-
-##########################################
-## 12. Merge PCA Euclidean distance with whole-pop KING + IBS
-##########################################
-euclDist="$pca_prefix.pca_pairwise_euclidean.dist"
-out_file="$pca_prefix.pca_pairwise_euclidean.dist.withKIN0"
-awk 'BEGIN {FS=OFS="\t"} FNR == NR {
-    if ($1 ~ /^#/) next
-    key = ($1":"$2 < $3":"$4) ?
-        $1":"$2"|" $3":"$4 :
-        $3":"$4"|" $1":"$2
-    kin0_extra = ""
-    for (i = 5; i <= NF; i++)
-        kin0_extra = kin0_extra OFS $i
-    kin0_data[key] = substr(kin0_extra, 2)
-    next
-}
-FNR == 1 {
-    print "FID1","IID1","FID2","IID2",
-        "PCA_EUCLIDEAN_DIST","KINSHIP_KING_PCA",
-        "NSNP","HETHET","IBS0","HET1_HOM2","HET2_HOM1","KINSHIP_PLINK","IBS"
-    next
-}
-{
-    key = ($1":"$2 < $3":"$4) ?
-        $1":"$2"|" $3":"$4 :
-        $3":"$4"|" $1":"$2
-    extra = (key in kin0_data ? kin0_data[key] : "NA")
-    print $1,$2,$3,$4,$5,$6,extra
-}
-' "$kingkin_wIBS" "$euclDist" > "$out_file"
-
-##########################################
-## 13. PCA Euclidean vs KING kinship correlation plot
-##########################################
-Rscript "$scripts/plot_correlation.R" "$out_file" PCA_EUCLIDEAN_DIST KINSHIP_PLINK
-mv "${OUTPUT_DIR}/divStats/correlation_plot_PCA_EUCLIDEAN_DIST_vs_KINSHIP_PLINK.png" \
-   "$pca_prefix.correlation_plot_PCA_EUCLIDEAN_DIST_vs_KINSHIP_PLINK.png"
-rclone -v copy "$pca_prefix.correlation_plot_PCA_EUCLIDEAN_DIST_vs_KINSHIP_PLINK.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
-
-##########################################
-## 14. Cross-method correlation plot (ROHRM vs KING vs PCA, per group)
-##########################################
-out_prefix="${OUTPUT_DIR}/divStats/${rg}.relatedness_correlation"
-Rscript scripts/correlation_plot.R --mode pairwise \
-    "${canonical_dir}/Pairwise_Differences.${rg}.csv" \
-    "$kingkin_wIBS" \
-    "$euclDist" \
-    "$out_prefix"
-rclone -v copy "$out_prefix.pairplot.png" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Relatedness/" --drive-shared-with-me
