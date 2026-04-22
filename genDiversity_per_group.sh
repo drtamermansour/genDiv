@@ -466,14 +466,12 @@ if [[ "$rg" == "wholePop" ]]; then
 fi
 
 ##########################################
-## 9. GRM + ROHRM + analysis_comparison → D_SNP, G_SNP, D_ROH, G_ROH
+## 9. Relatedness Matrices (GRM + ROHRM) → G_SNP, D_SNP, G_ROH, D_ROH 
 ##########################################
-## Per-group standard GRM (vanRaden) via plink2 --make-rel + per-group ROHRM
-## (Howard re-implementation). analysis_comparison.py writes
-## Inbreeding_Comparison.csv (IID, D_STD, D_ROH, Phenotype) and
-## Pairwise_Differences.csv (ID1, ID2, Pheno1, Pheno2, Kinship_Std, Kinship_ROH,
-## Difference). Column schemas match the current whole-pop outputs so GPA's
-## fixed-column-index reads keep working.
+## Per-group standard GRM (vanRaden) via plink2 --make-rel + per-group ROHRM (Howard re-implementation). 
+## analysis_comparison.py writes Inbreeding_Comparison.csv (IID, D_STD, D_ROH, Phenotype) and
+## Pairwise_Differences.csv (ID1, ID2, Pheno1, Pheno2, Kinship_Std, Kinship_ROH, Difference). 
+
 grp_workdir="${OUTPUT_DIR}/rep_ROHRM/perGroup_${rg}"
 mkdir -p "$grp_workdir"
 
@@ -486,9 +484,7 @@ plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
     --output-chr 'chrM' --out "$grm_prefix"
 
 ## 9b. Per-group ROHRM + analysis_comparison at every cutoff in $ROH_CUTOFFS
-##     ($ROH_CUTOFFS lives in CONFIG so it's already user-tunable there.)
-## Per-cutoff outputs land at rep_ROHRM/roh_${cutoff%.*}Mb.Threshold_${sd}SD/ with
-## a .${rg}. suffix, matching the whole-pop subfolder scheme used previously.
+## Per-cutoff outputs land at rep_ROHRM/roh_${cutoff%.*}Mb.Threshold_${sd}SD/ with a .${rg}. suffix.
 ## canonical_dir below is the primary-cutoff subfolder, used later in §14
 ## (cross-method correlation) and §15 (froh-cons correlation plots) — which
 ## consume only the primary cutoff's Pairwise_Differences / Inbreeding_Comparison.
