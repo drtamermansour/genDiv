@@ -57,12 +57,12 @@ CHROM   POS   REF,ALT   AF
 Built via `bcftools +fill-tags $group_vcf -- -t AF | bcftools query -f'%CHROM\t%POS\t%REF,%ALT\t%INFO/AF\n'`. Consumed by `bcftools roh --AF-file` only — not by PLINK or R scripts. Schema is identical to GPA's legacy self-built `freqs.tab.gz` (the whole-pop file it produced from `popVCF` via the same `+fill-tags`/`query` pipeline).
 
 ### `filtered.LD_prune.het_stats.${rg}.het` (PLINK2 `--het` + `--read-freq`)
-Tab-separated. Header starts with `#FID` (PLINK2 output).
+Tab-separated. Header starts with `#FID` (PLINK2 output under `--het cols=fid,hom,het,nobs,f`, 8 columns).
 ```
-#FID   IID   O(HOM)   E(HOM)   OBS_CT   F
- 0     1      2         3         4      5
+#FID   IID   O(HOM)   E(HOM)   O(HET)   E(HET)   OBS_CT   F
+ 0     1      2         3         4        5        6      7
 ```
-GPA reads `F` (F_SNP) at 0-based column 5.
+GPA reads `F` (F_SNP) at 0-based column 7.
 
 ### `roh_summary_by_RG_L3_Froh.${rg}.txt`
 Tab-separated, header `IID  NSEG  KB  KBAVG  F_ROH`.
@@ -112,21 +112,36 @@ Tab-separated. Header `IID  group`. `group ∈ {Trotter, Pacer, wholePop}`. Samp
 
 This table exists to avoid surprise when comparing the new per-group files to the original pipeline's single whole-pop output.
 
-| File | wholePop | Trotter / Pacer |
-|---|---|---|
-| `pruned.${rg}.afreq` | Identical to the old `pl1_pruned.freq_stats.afreq` (PLINK2 `--freq` on the same samples). | **New content.** AF from group members only; a locus common in whole-pop but rare in Trotter gets a different number. |
-| `freqs.${rg}.tab.gz` (+ `.tbi`) | Byte-identical to GPA's legacy self-built `freqs.tab.gz` when built on the same whole-pop phased VCF via the same `bcftools +fill-tags \| bcftools query` pipeline. | **New content.** AF computed over group members only via `bcftools +fill-tags` on the group-subset VCF. Changes `bcftools roh` calibration for any downstream ROH call that uses `--AF-file freqs.${rg}.tab.gz` on a candidate animal. |
-| `filtered.LD_prune.het_stats.${rg}.het` | Numerically equivalent to the old `filtered.LD_prune.het_stats.het`. We pass `--read-freq pruned.wholePop.afreq`, which is identical to PLINK2's internal default AF for the whole-pop case. | **New content.** `F` reflects inbreeding relative to group AF, not whole-pop AF. |
-| `roh_summary_by_RG_L3_Froh.${rg}.txt` | Identical to the old bare whole-pop F_ROH summary. `bcftools roh --estimate-AF -` on the wholePop subset == on the full VCF. | **New content.** `bcftools roh` is called on the group-subset VCF, so ROH segments themselves differ — this is the "option (ii)" decision from the refactor brainstorm. |
-| `Inbreeding_Comparison.${rg}.csv` / `Pairwise_Differences.${rg}.csv` | Identical to the primary-cutoff (1.0 Mb) whole-pop output from the old Section-6 ROHRM loop. | **New content.** ROHRM run on the group-subset phased VCF; GRM on the group-subset BED with `--read-freq pruned.${rg}.afreq`. |
-| `roh.L3.consensus_25pct.merged.${rg}.smoothed.bed` | Identical to the old per-subpop consensus BED for wholePop. | **New content** (option ii). Consensus is built from the group's own ROH calls, so Trotter's islands reflect Trotter-specific selection / drift, not whole-pop. |
-| `roh.L3.perSample_intersect_${rg}_consensus_25pct.summary.txt` | Identical to today's wholePop ROH_sh table. | **New content.** Derived from the group's own consensus BED above. |
+### ⚠️ Important baseline caveat — the SNP set has drifted
 
-**Practical implication for GPA reports:** tabs that used to show identical distributions (whole-pop everywhere) will now show different distributions on Trotter / Pacer tabs for F_SNP, F_ROH, D_SNP, D_ROH, G_SNP, G_ROH, and ROH_sh. The wholePop tab should continue to match the current report's numbers.
+The claims in this section are about **pipeline logic equivalence on a fixed input**, *not* byte-equality against whichever older `popFiles/` bundle GPA last imported. The upstream filtered/phased VCF and the LD-pruned SNP set can change between pipeline runs because (a) the source `SNPdata_iScan_Standardbred/` on the shared Google Drive may be refreshed, and (b) LD pruning has stochastic tie-breaking. An empirical check between GPA's `popFiles/` snapshot from `2026-03-28` and upstream run `results_20260421_200003` on the **same 560 samples** showed:
+
+- **Filtered SNP set:** 57,829 → 58,411 (+590 new, 8 dropped, 57,821 common).
+- **LD-pruned SNP set:** 45,576 → 46,096 (+2,080 new, 1,560 dropped, 44,016 common).
+- **Sample set:** unchanged (560 ↔ 560, exact IID overlap).
+
+Because the SNP set drifts, every wholePop file downstream of the filtered / pruned SNP sets drifts numerically as well. The magnitude is small for most metrics but non-zero. The table below states the claim for pipeline-logic equivalence (what a re-run on the *same* filtered VCF would produce) and, separately, the measured drift against the legacy popFiles bundle so GPA does not build a byte-equality regression test by mistake.
+
+| File | wholePop (pipeline-logic equivalence, same input) | wholePop measured drift vs legacy popFiles (2026-03-28) | Trotter / Pacer |
+|---|---|---|---|
+| `pruned.${rg}.afreq` | Identical to the old `pl1_pruned.freq_stats.afreq` when run on the same pruned SNP set. | On the 44,016 common SNPs: `ALT_FREQS` exactly equal (max \|Δ\|=0). File as a whole differs by 1,560 legacy-only + 2,080 current-only rows. | **New content.** AF from group members only; a locus common in whole-pop but rare in Trotter gets a different number. |
+| `freqs.${rg}.tab.gz` (+ `.tbi`) | Byte-identical to GPA's legacy self-built `freqs.tab.gz` when built on the same whole-pop phased VCF via the same `bcftools +fill-tags \| bcftools query` pipeline. | On the 57,806 common (CHROM, POS) pairs: mean \|ΔAF\|=3e-6, RMS=6e-5, max=3.6e-3 (floating-point noise). Plus 605 current-only + 23 legacy-only sites from the filtered-set drift. | **New content.** AF computed over group members only via `bcftools +fill-tags` on the group-subset VCF. Changes `bcftools roh` calibration for any downstream ROH call that uses `--AF-file freqs.${rg}.tab.gz` on a candidate animal. |
+| `filtered.LD_prune.het_stats.${rg}.het` | Numerically equivalent to the old `filtered.LD_prune.het_stats.het` on the same pruned set. We pass `--read-freq pruned.wholePop.afreq`, which equals PLINK2's internal default for the whole-pop case. | On the 560 common IIDs: mean \|ΔF\|=0.0019, RMS=0.0053, **max=0.060**. Inherits the pruned-set drift via `--read-freq`. | **New content.** `F` reflects inbreeding relative to group AF, not whole-pop AF. |
+| `roh_summary_by_RG_L3_Froh.${rg}.txt` | Identical to the old bare whole-pop F_ROH summary given the same phased VCF. `bcftools roh --estimate-AF -` on the wholePop subset == on the full VCF. | On the 560 common IIDs: mean \|ΔF_ROH\|=0.0005, RMS=0.0008, max=0.0047. Drift is tiny because bcftools roh is robust to the filtered-SNP-set churn. | **New content.** `bcftools roh` is called on the group-subset VCF, so ROH segments themselves differ — this is the "option (ii)" decision from the refactor brainstorm. |
+| `Inbreeding_Comparison.${rg}.csv` / `Pairwise_Differences.${rg}.csv` | Identical to the primary-cutoff (1.0 Mb) whole-pop output from the old Section-6 ROHRM loop given the same inputs. | On 542 common IIDs (both files silently drop the 18 gait-less samples — see `ISSUE_wholePop_ROHRM_sample_drop.md`): D_STD mean \|Δ\|=0.0017 max=0.095; D_ROH mean \|Δ\|=0.0003 max=0.001. D_STD drift tracks the pruned-set churn; D_ROH is essentially stable. | **New content.** ROHRM run on the group-subset phased VCF; GRM on the group-subset BED with `--read-freq pruned.${rg}.afreq`. |
+| `roh.L3.consensus_25pct.merged.${rg}.smoothed.bed` | Identical to the old per-subpop consensus BED for wholePop given the same ROH calls. | Region count differs (legacy 67 → current 68); boundaries drift because the underlying per-base ROH coverage changes with the filtered-set churn. | **New content** (option ii). Consensus is built from the group's own ROH calls, so Trotter's islands reflect Trotter-specific selection / drift, not whole-pop. |
+| `roh.L3.perSample_intersect_${rg}_consensus_25pct.summary.txt` | Identical to today's wholePop ROH_sh table given the same consensus BED. | On 560 common IIDs: mean \|Δ ROH_sh\|=0.20 pct-points, max=1.50 pct-points. Inherits the consensus-BED drift. | **New content.** Derived from the group's own consensus BED above. |
+
+**Practical implication for GPA reports:**
+- **Tab-shape expectations:** tabs that used to show identical distributions (whole-pop everywhere) will now show different distributions on Trotter / Pacer tabs for F_SNP, F_ROH, D_SNP, D_ROH, G_SNP, G_ROH, and ROH_sh. The wholePop tab should *shape*-match the legacy report — distribution histograms and percentile lines will look the same to the eye — but individual sample values will shift by the drift magnitudes above.
+- **Do not build a byte-equality regression test** against the March-28 popFiles bundle. The SNP set has moved on since. A useful regression test is a shape/percentile check (e.g. P25/P50/P75 of each distribution within ±0.01 of legacy) or a re-run of this very comparison on a freshly-refreshed upstream `OUTPUT_DIR`.
+- **Treat `ISSUE_wholePop_ROHRM_sample_drop.md` as independent** of the drift above: that issue is a missing-data bug (ungrouped samples dropped from ROHRM CSVs), not SNP-set drift.
 
 ---
 
 ## 4. Checklist for the GPA-side `create_popFiles.sh` PR
+
+**Branch name convention.** Open the GPA-side PR on a branch named **`per-group-references`** (no prefix). The upstream `genDiv` work lives on the same branch name there — keeping the two in lockstep makes the coordinated merge easier to reason about in PR URLs and chat threads. Neither repo's branch is merged yet as of this doc's writing; pair-merge them when both sides are green.
 
 Mechanical steps. Run through in order:
 
