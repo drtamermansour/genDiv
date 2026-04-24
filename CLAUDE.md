@@ -65,7 +65,7 @@ Conceptual workflow phases:
 2. **Data Exploration** (`shared.sh`) — sex validation (X chr F-stats), PAR removal, HWE analysis.
 3. **Final Filtering** (`shared.sh`) — apply missingness/MAF/HWE thresholds to produce the clean dataset; LD pruning.
 4. **Whole-pop preprocessing tail** (`shared.sh`) — derives `effective_autosomal_genome_length.txt`, `autosomes.genome`, and per-group sample lists (`samples.${rg}.txt` + `sample_groups.tsv`) so `per_group.sh` can run.
-5. **Per-group reference files** (`per_group.sh`, 3×) — sections mirroring the original pipeline order. Highlights: per-group afreq, PCA + overlays (wSex / wGait wholePop-only, wBook_Size / wCOI all groups), A_e and whole-pop FST (wholePop-only), FST book-size-within-gait, per-group F_SNP `.het`, per-group bcftools roh + L1/L2/L3 + consensus ROH (nested over book-size for Trotter/Pacer), F_ROH summary, per-group GRM + ROHRM + analysis_comparison across all `$ROH_CUTOFFS`, per-group KING + IBS + `related.${rg}`, PCA pairwise Euclidean, cross-method correlation plot, and COI-vs-F_ROH / F_ROH-vs-D_ROH / F_SNP-vs-D_ROH / F_SNP-vs-F_ROH doubleAnn plots.
+5. **Per-group reference files** (`per_group.sh`, 3×) — sections mirroring the original pipeline order. Highlights: per-group afreq, PCA + overlays (wSex / wGait wholePop-only, wBook_Size / wCOI all groups), A_e and whole-pop FST (wholePop-only), FST book-size-within-gait, per-group F_SNP `.het`, per-group bcftools roh + L1/L2/L3 + consensus ROH (nested over book-size for Trotter/Pacer), per-group tabix `freqs.${rg}.tab.gz` emitted alongside the ROH call for downstream GPA `bcftools roh --AF-file` consumption, F_ROH summary, per-group GRM + ROHRM + analysis_comparison across all `$ROH_CUTOFFS`, per-group KING + IBS + `related.${rg}`, PCA pairwise Euclidean, cross-method correlation plot, and COI-vs-F_ROH / F_ROH-vs-D_ROH / F_SNP-vs-D_ROH / F_SNP-vs-F_ROH doubleAnn plots.
 6. **Cross-group aggregation** (`aggregate.sh`) — `fst_stats.R` over the five FST summaries, twoGait and threeBooksize per-sample ROH_sh concatenations, Froh-vs-ROHsh plots iterating wholePop / twoGait / threeBooksize.
 7. **Upload** — `rclone` is invoked throughout each subscript; there's no single upload phase.
 
@@ -134,6 +134,7 @@ genDiversity_per_group.sh  (runs 3× — wholePop, Trotter, Pacer)
   §4  filtered.LD_prune.het_stats.${rg}.het (via --read-freq)
   §5  PCA COI overlay using per-group .het
   §6  bcftools roh on group-subset VCF + L1/L2/L3 filter chain
+      (also emits freqs.${rg}.tab.gz + .tbi for downstream GPA AF-file consumption)
   §7  per-base consensus ROH (wholePop alone, or gait + 3 book-size subs)
   §8  roh_summary_by_RG_L3_Froh.${rg}.txt (F_ROH summary)
   §9  per-group GRM + ROHRM + analysis_comparison at every $ROH_CUTOFFS cutoff
@@ -174,11 +175,12 @@ A fresh clone of `genDiv` alone will fail early with path errors.
 
 `per_group.sh` produces deliverables consumed by the downstream GPA report pipeline (`../GPA/create_popFiles.sh`). The authoritative contract — filenames, schemas, column indices, and the per-file table of "numerically equivalent to today vs genuinely new content" — lives in **`MIGRATION.md`**. Any change to a producer or a consumer must update MIGRATION.md in the same PR.
 
-Quick summary of the eight per-group files:
+Quick summary of the nine per-group files:
 
 | File | Location | Purpose |
 |---|---|---|
-| `pruned.${rg}.afreq` | `LD_pruned/` | group-specific allele frequencies (feeds `--read-freq`) |
+| `pruned.${rg}.afreq` | `LD_pruned/` | group-specific allele frequencies on the LD-pruned SNP set (feeds PLINK2 `--read-freq`) |
+| `freqs.${rg}.tab.gz` (+ `.tbi`) | `divStats/` | tabix-indexed `CHROM POS REF,ALT AF` on the filtered SNP set; consumed by downstream GPA's `bcftools roh --AF-file` on 1–2 animal mate-pair VCFs |
 | `filtered.LD_prune.het_stats.${rg}.het` | `divStats/` | F_SNP het reference, computed with group AF |
 | `roh_summary_by_RG_L3_Froh.${rg}.txt` | `divStats/` | F_ROH reference (bcftools roh on group-subset VCF) |
 | `roh.L3.consensus_25pct.merged.${rg}.smoothed.bed` | `divStats/` | Consensus ROH regions from the group's own ROH calls |

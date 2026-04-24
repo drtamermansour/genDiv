@@ -51,6 +51,8 @@ case "$mode" in upstream|popFiles) : ;; *) echo "ERROR: --mode must be upstream 
 ##############################################################################
 FILE_SPECS=(
     "afreq|LD_pruned|pruned.%RG%.afreq|^#CHROM[[:space:]]+ID[[:space:]]+REF[[:space:]]+ALT|any"
+    "freqs|divStats|freqs.%RG%.tab.gz||any"
+    "freqs_tbi|divStats|freqs.%RG%.tab.gz.tbi||any"
     "het|divStats|filtered.LD_prune.het_stats.%RG%.het|^#?FID[[:space:]]+IID[[:space:]]+O\\(HOM\\)|NGRP+1"
     "froh|divStats|roh_summary_by_RG_L3_Froh.%RG%.txt|^IID[[:space:]]+NSEG[[:space:]]+KB[[:space:]]+KBAVG[[:space:]]+F_ROH$|NGRP+1"
     "inbreeding|rep_ROHRM/roh_1Mb.Threshold_3SD|Inbreeding_Comparison.%RG%.csv|^IID,D_STD,D_ROH,Phenotype$|NGRP+1"

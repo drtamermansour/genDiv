@@ -287,6 +287,20 @@ else
     bcftools index -t "$group_vcf"
 fi
 
+## Per-group tabix-indexed AF table consumed by downstream GPA's `bcftools roh
+## --AF-file` on 1-2 animal mate-pair VCFs (which can't --estimate-AF
+## themselves). Built on the same $group_vcf used for the upstream ROH call
+## below, so the AF basis matches what the reference-distribution ROH run sees.
+## For wholePop this is numerically equivalent to GPA's legacy self-built
+## freqs.tab.gz; for Trotter/Pacer it is new per-group content.
+freqs_prefix="${OUTPUT_DIR}/divStats/freqs.${rg}"
+bcftools +fill-tags "$group_vcf" -- -t AF \
+    | bcftools query -f'%CHROM\t%POS\t%REF,%ALT\t%INFO/AF\n' \
+    | bgzip -c > "${freqs_prefix}.tab.gz"
+tabix -s1 -b2 -e2 "${freqs_prefix}.tab.gz"
+rclone -v copy "${freqs_prefix}.tab.gz"     "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
+rclone -v copy "${freqs_prefix}.tab.gz.tbi" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/ROH/bcftools/" --drive-shared-with-me
+
 ## ROH calls driven by the group's own AF (via --estimate-AF on the subset VCF).
 bcftools roh -G30 --estimate-AF - "$group_vcf" -o "${OUTPUT_DIR}/divStats/roh_out.${rg}.txt"
 grep -E "^# RG|^RG" "${OUTPUT_DIR}/divStats/roh_out.${rg}.txt" > "${OUTPUT_DIR}/divStats/roh_out_RG.${rg}.txt"
