@@ -5,9 +5,10 @@
 #   --mode upstream    Check the pipeline's OUTPUT_DIR, where files sit in
 #                      divStats/, LD_pruned/, rep_ROHRM/roh_1Mb.Threshold_3SD/,
 #                      and preprocess/.
-#   --mode popFiles    Check a flat popFiles/ directory as produced by GPA's
-#                      create_popFiles.sh — every file has the same basename
-#                      but lives directly under --root.
+#   --mode popFiles    Check a popFiles/ directory under --root (as produced
+#                      by GPA's create_popFiles.sh). Files have the same
+#                      basenames as upstream — the upstream subdir column is
+#                      ignored; everything is expected at $root/popFiles/.
 #
 # In either mode it iterates over rg ∈ {wholePop, Trotter, Pacer}, asserts each
 # expected file exists, is non-empty, has the expected header, and (where
@@ -76,7 +77,7 @@ resolve_path() {
     if [[ "$mode" == "upstream" ]]; then
         printf '%s' "${root}/${subdir}/${filename}"
     else
-        printf '%s' "${root}/${filename}"
+        printf '%s' "${root}/popFiles/${filename}"
     fi
 }
 
@@ -86,7 +87,7 @@ group_size() {
     # fall back to counting rows of whatever per-sample file we can find.
     local rg="$1"
     local upstream_samples="${root}/preprocess/samples.${rg}.txt"
-    local popfiles_samples="${root}/samples.${rg}.txt"
+    local popfiles_samples="${root}/popFiles/samples.${rg}.txt"
     if [[ -f "$upstream_samples" ]]; then
         wc -l < "$upstream_samples" | tr -d ' '
     elif [[ -f "$popfiles_samples" ]]; then
