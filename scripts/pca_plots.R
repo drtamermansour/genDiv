@@ -52,11 +52,11 @@ make_plot <- function(xpc, ypc) {
 
 if (n_pcs == 3L) {
   plots <- list(make_plot(1, 2), make_plot(1, 3), make_plot(2, 3))
-  combined <- grid.arrange(grobs = plots, nrow = 1)
+  combined <- arrangeGrob(grobs = plots, nrow = 1)
   ggsave(file = out_png, combined, width = 16, height = 4, dpi = 400)
 } else {
   plots <- list(make_plot(1, 2), make_plot(1, 3), make_plot(1, 4),
                 make_plot(2, 3), make_plot(2, 4), make_plot(3, 4))
-  combined <- grid.arrange(grobs = plots, nrow = 2)
+  combined <- arrangeGrob(grobs = plots, nrow = 2)
   ggsave(file = out_png, combined, width = 16, height = 8, dpi = 400)
 }
