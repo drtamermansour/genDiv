@@ -71,3 +71,10 @@ bash scripts/benchmark/run_benchmark.sh \
      --source results_<timestamp> \
      --target results_benchmark_25x25
 ```
+
+## Upload outputs
+If you would like to re-upload the outputs of any run (either actual or benchmarking) to the folder `outputs` in GDrive, you can run this command:
+
+```bash
+OUTPUT_DIR=[Path to results folder] bash upload_outputs.sh
+``` 
