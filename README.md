@@ -35,7 +35,7 @@ conda activate genDiv
 
 ## Running
 
-The pipeline expects sibling repositories next to this one (`../Equine80select_remapper/` and `../Horse_parentage_SNPs/equCab3/`) and a configured rclone remote (`remote_UCDavis_GoogleDr`). See `CLAUDE.md` → "Repository layout expectations" for details.
+The pipeline expects sibling repositories next to this one (`../InfiniTier/` and `../Horse_parentage_SNPs/equCab3/`) and a configured rclone remote (`remote_UCDavis_GoogleDr`). See `CLAUDE.md` → "Repository layout expectations" for details.
 
 ```bash
 git clone git@github.com:drtamermansour/genDiv.git

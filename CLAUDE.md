@@ -165,7 +165,7 @@ Each run writes its full stdout+stderr to `${OUTPUT_DIR}/run.log` via a `tee` + 
 
 The pipeline also expects two sibling repositories and a configured rclone remote to exist:
 
-- `../Equine80select_remapper/results/matchingSNPs_binary_consistantMapping.equCab3_map` — EquCab3 remap table
+- `../InfiniTier/results/matchingSNPs_binary_consistantMapping.equCab3_map` — EquCab3 remap table
 - `../Horse_parentage_SNPs/equCab3/download/equCab3.fa` + `equCab3_genome.fa.fai` — reference genome
 - `remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs` — rclone remote for input download and output upload
 

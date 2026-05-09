@@ -5,7 +5,7 @@
 # CONFIG — edit these values to adapt the pipeline
 # ============================================================
 # Paths (relative to the parent directory of this repo)
-equCab3_map="$(pwd)/../Equine80select_remapper/results_E80selv2_to_equCab3noAlt_genDiv/qc/Equine80select_v2_1_HTS_20143333_B1_UCD_allele_map_equCab3noAlt.tsv"
+equCab3_map="$(pwd)/../InfiniTier/results_E80selv2_to_equCab3noAlt_genDiv/qc/Equine80select_v2_1_HTS_20143333_B1_UCD_allele_map_equCab3noAlt.tsv"
 ref="../Horse_parentage_SNPs/equCab3/download/equCab3.fa"
 reference_fai="../Horse_parentage_SNPs/equCab3/equCab3_genome.fa.fai"
 GDRIVE_BASE="remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs"
