@@ -155,6 +155,8 @@ for rg in wholePop Trotter Pacer; do
     if [[ "$rg" == "wholePop" ]]; then
         push "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.histo" "Froh"
         push "${OUTPUT_DIR}/divStats/roh_high.csv" "Froh"
+        push "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.sumStats.csv" "Froh"
+        push "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.sumStats.csv" "Froh"
     fi
 
     # §9 ROHRM per-cutoff outputs (Inbreeding_Comparison / Pairwise_Differences / matrix png)
