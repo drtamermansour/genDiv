@@ -465,6 +465,7 @@ if [[ "$rg" == "wholePop" ]]; then
     python scripts/summary_roh.py \
         -i "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.txt" \
         -o "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.sumStats.csv" -n 4
+    rclone -v copy "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.sumStats.csv" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/" --drive-shared-with-me
 
     awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {if(gait[$1])print $0,gait[$1];else print $0,"undefined";}' \
         "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize" "$froh_wholePop" \
@@ -472,6 +473,7 @@ if [[ "$rg" == "wholePop" ]]; then
     python scripts/summary_roh.py \
         -i "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.txt" \
         -o "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.sumStats.csv" -n 4
+    rclone -v copy "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.sumStats.csv" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/" --drive-shared-with-me
 fi
 
 ##########################################
