@@ -1,0 +1,41 @@
+# Generated data -- all downloaded inputs and all pipeline outputs.
+# Each pipeline run creates a fresh timestamped directory: results_YYYYMMDD_HHMMSS/
+input_data/
+results_*/
+
+# Stray outputs from the pre-refactor layout (safe to delete manually once confirmed unneeded).
+SNPdata_iScan_Standardbred/
+Miscellaneous_documents_standardbred/
+preprocess/
+dedup/
+filtered/
+inspect/
+LD_pruned/
+divStats/
+rep_ROHRM/
+logs/
+Fst_Analysis_Results_Adjusted.csv
+high_positive_kinship_diff.csv
+high_negative_kinship_diff.csv
+running.log
+genDiversity.sh_troubleShout
+Rplots.pdf
+
+# Python / R caches.
+__pycache__/
+*.pyc
+.Rhistory
+.RData
+.Ruserdata
+
+# Editor / OS noise.
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Development-only re-runner for the ROH_common stage. This is a throwaway
+# convenience that inlines per_group.sh §7.5 + aggregate.sh ROH_common block
+# so the metric can be re-computed against an existing OUTPUT_DIR without
+# rerunning the full pipeline. Production code lives in genDiversity_*.sh.
+scripts/run_roh_common.sh

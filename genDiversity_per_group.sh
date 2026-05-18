@@ -446,7 +446,7 @@ rclone -v copy "${OUTPUT_DIR}/divStats/roh_summary_by_RG_L3_Froh.${rg}.txt" "rem
 
 ##########################################
 ## 8b. Whole-pop F_ROH histogram, high-F_ROH shortlist, and gait / gait_bookSize
-##     stratified F_ROH summaries (wholePop only)
+##     stratified F_ROH + NSEG-length-bin summaries (wholePop only)
 ##########################################
 ## Only uses wholePop F_ROH + global metadata, so runs once.
 if [[ "$rg" == "wholePop" ]]; then
@@ -466,6 +466,11 @@ if [[ "$rg" == "wholePop" ]]; then
         -i "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.txt" \
         -o "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.sumStats.csv" -n 4
     rclone -v copy "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.sumStats.csv" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/" --drive-shared-with-me
+    python scripts/summary_nseg_bins.py \
+        -i "${OUTPUT_DIR}/divStats/roh.L3.${rg}.txt" \
+        -f "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait.txt" \
+        -o "${OUTPUT_DIR}/divStats/roh.L3_NSEGbins_gait.sumStats.csv"
+    rclone -v copy "${OUTPUT_DIR}/divStats/roh.L3_NSEGbins_gait.sumStats.csv" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/" --drive-shared-with-me
 
     awk 'BEGIN{FS=OFS="\t";gait["IID"]="gait"}FNR==NR{gait[$2]=$3;next} {if(gait[$1])print $0,gait[$1];else print $0,"undefined";}' \
         "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize" "$froh_wholePop" \
@@ -474,6 +479,11 @@ if [[ "$rg" == "wholePop" ]]; then
         -i "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.txt" \
         -o "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.sumStats.csv" -n 4
     rclone -v copy "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.sumStats.csv" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/" --drive-shared-with-me
+    python scripts/summary_nseg_bins.py \
+        -i "${OUTPUT_DIR}/divStats/roh.L3.${rg}.txt" \
+        -f "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.txt" \
+        -o "${OUTPUT_DIR}/divStats/roh.L3_NSEGbins_gait_bookSize.sumStats.csv"
+    rclone -v copy "${OUTPUT_DIR}/divStats/roh.L3_NSEGbins_gait_bookSize.sumStats.csv" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/Froh/" --drive-shared-with-me
 fi
 
 ##########################################

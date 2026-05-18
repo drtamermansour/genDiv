@@ -76,6 +76,7 @@ Conceptual workflow phases:
 | `ROHRM_Creator.py` | Builds the ROH-based Relationship Matrix (ROHRM) — implements Howard et al. C++ logic in Python using window-based haplotype matching on phased VCF data |
 | `analysis_comparison.py` | Compares ROHRM vs standard GRM; `RobustMatrixComparator` class |
 | `summary_roh.py` | ROH summary statistics grouped by subpopulation. `-n/--n-numeric-cols N` (default 3) controls how many numeric columns are summarised; the column right after the numeric block is the grouping factor |
+| `summary_nseg_bins.py` | Per-subgroup summary of L3 ROH segment counts binned by length: `NSEG_1to3`, `NSEG_3to5`, `NSEG_5to10`, `NSEG_more10` (Mb, half-open [low, high)). Takes the per-segment `roh.L3.${rg}.txt` and a factor TSV (IID in col 1, factor in last col, same shape as `roh.L3_Froh_gait.txt`) |
 | `summary_het.py` | Heterozygosity summary stats (observed/expected, F-coefficients) |
 | `roh_plot.py` | Scatter plots correlating F_ROH vs consensus ROH sharing |
 | `roh_histograms.py` | Unified histogram script: use `--metric ratio` (ROH_shared/F_ROH) or `--metric shared` (Percent_of_Consensus_ROH) |
@@ -137,6 +138,8 @@ genDiversity_per_group.sh  (runs 3× — wholePop, Trotter, Pacer)
       (also emits freqs.${rg}.tab.gz + .tbi for downstream GPA AF-file consumption)
   §7  per-base consensus ROH (wholePop alone, or gait + 3 book-size subs)
   §8  roh_summary_by_RG_L3_Froh.${rg}.txt (F_ROH summary)
+  §8b wholePop-only: gait / gait_bookSize F_ROH summary CSVs +
+      roh.L3_NSEGbins_{gait,gait_bookSize}.sumStats.csv (NSEG length-bin summaries)
   §9  per-group GRM + ROHRM + analysis_comparison at every $ROH_CUTOFFS cutoff
       → Inbreeding_Comparison.${rg}.csv + Pairwise_Differences.${rg}.csv
   §10 per-group KING + IBS + related.${rg} (per-group --make-king-table)
