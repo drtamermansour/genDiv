@@ -34,6 +34,11 @@ CONSENSUS_MIN_MB=0.5    # Minimum consensus ROH region size (Mb)
 PRIMARY_ROH_MB=1.0      # Primary ROH window cutoff used in downstream analyses
 ROH_CUTOFFS="1.0 5.0 10.0"   # All ROH window cutoffs to evaluate
 
+# ROH_common (continuous population-autozygosity metric)
+ROH_COMMON_WINDOW_KB=100             # Fixed 100 kb genomic tiling for the f_w landscape
+ROH_COMMON_LENGTH_BINS="1,3,5,10"    # ROH length-class edges in Mb (1-3, 3-5, 5-10, >10);
+                                     # aligned with summary_nseg_bins.py
+
 # Directory layout (relative to the working directory)
 OUTPUT_DIR="${OUTPUT_DIR:-results_$(date +%Y%m%d_%H%M%S)}" # per-run output dir; override via env var, else fresh timestamped folder
 

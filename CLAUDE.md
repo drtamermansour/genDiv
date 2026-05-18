@@ -80,6 +80,10 @@ Conceptual workflow phases:
 | `summary_het.py` | Heterozygosity summary stats (observed/expected, F-coefficients) |
 | `roh_plot.py` | Scatter plots correlating F_ROH vs consensus ROH sharing |
 | `roh_histograms.py` | Unified histogram script: use `--metric ratio` (ROH_shared/F_ROH) or `--metric shared` (Percent_of_Consensus_ROH) |
+| `roh_common_landscape.py` | Builds the per-window population ROH frequency landscape (f_w = n_w/N) for one group — genome-wide + 4 length-class landscapes (`landscape.${rg}.{,1to3,3to5,5to10,more10}.tsv`). bedtools subprocess for all interval arithmetic. |
+| `roh_common_individual.py` | Per-individual ROH_common scoring with **exact** leave-one-out: `mean over w in W_i of (n_w − 1)/(N − 1)`. Emits `roh_common.${rg}.tsv` with genome-wide + 4 class scores + window counts; NA when a length class is empty for an individual. |
+| `roh_common_plot.py` | Multi-mode plotter for Figures 2–4 of the ROH_common manuscript: `manhattan` (raw line plot, no smoothing), `scatter`, `lengthbox`. |
+| `roh_common_subgroup_summary.py` | 9-row mean +/- SD table across the 5 ROH_common metrics: wholePop (cohort-wide scoring) + Pacer/Trotter + 6 gait × book-size subgroups (within-gait scoring). Emits `divStats/roh_common/roh_common_subgroup_summary.csv`. |
 | `utils.py` | Shared constants (`BOOK_SIZE_ORDER`, `BOOK_SIZE_COLORS`) and `format_stats()` used by summary scripts |
 
 All Python scripts use `argparse`; run with `--help` to see usage.
@@ -137,6 +141,9 @@ genDiversity_per_group.sh  (runs 3× — wholePop, Trotter, Pacer)
   §6  bcftools roh on group-subset VCF + L1/L2/L3 filter chain
       (also emits freqs.${rg}.tab.gz + .tbi for downstream GPA AF-file consumption)
   §7  per-base consensus ROH (wholePop alone, or gait + 3 book-size subs)
+  §7.5 ROH_common landscape (genome-wide + 4 length-class f_w maps for the
+       main group) + per-individual ROH_common with exact LOO;
+       writes divStats/roh_common/
   §8  roh_summary_by_RG_L3_Froh.${rg}.txt (F_ROH summary)
   §8b wholePop-only: gait / gait_bookSize F_ROH summary CSVs +
       roh.L3_NSEGbins_{gait,gait_bookSize}.sumStats.csv (NSEG length-bin summaries)
@@ -152,6 +159,9 @@ genDiversity_aggregate.sh  (runs once)
   → fst_stats.R (reads all 5 FST summaries: 3 whole-pop + 2 per-gait book-size)
   → twoGait / threeBooksize per-sample ROH_sh concatenations
   → Froh-vs-ROHsh plots (wholePop / twoGait / threeBooksize)
+  → ROH_common: twoGait / threeBooksize per-sample score concatenations +
+                Figures 2-4 (Manhattan landscape, F_ROH vs ROH_common
+                scatter, length-stratified boxplots)
   ↓
 Google Drive (rclone upload — interleaved, not a dedicated phase)
 ```
@@ -219,6 +229,9 @@ All tunable values are centralized in the CONFIG block at the top of `genDiversi
   - `pct=25` (min % samples in ROH to define consensus region)
   - `CONSENSUS_MIN_MB=0.5`
   - `ROH_THRESHOLD_SD=3.0` (window SNP-count filter)
+- **ROH_common (continuous population-autozygosity metric)**
+  - `ROH_COMMON_WINDOW_KB=100` (fixed window size for the f_w landscape)
+  - `ROH_COMMON_LENGTH_BINS="1,3,5,10"` (ROH length-class edges in Mb; aligned with `summary_nseg_bins.py` bins)
 - **Directory layout**
   - `OUTPUT_DIR="results_$(date +%Y%m%d_%H%M%S)"` — fresh timestamped folder every run; override by exporting `OUTPUT_DIR=<existing_dir>` before invocation to reuse or resume into a prior folder.
 - **Phasing:** BEAGLE (required before `ROHRM_Creator.py`)

@@ -62,3 +62,84 @@ for gp in wholePop twoGait threeBooksize; do
     run_python scripts/roh_histograms.py --metric shared "$conShare" "$froh" "$output_prefix2"
     upload "$output_prefix2".histogram.png "Froh/"
 done &> "${OUTPUT_DIR}/divStats/roh_sh.log"
+
+##########################################
+## ROH_common cross-group concatenations and Figures 2-4
+##########################################
+## Each sample is scored against its own group's landscape during per_group.sh.
+## Aggregate.sh stitches those per-group TSVs into the twoGait and
+## threeBooksize views (every sample appears exactly once), then drives
+## the three ROH_common figures.
+roh_common_dir="${OUTPUT_DIR}/divStats/roh_common"
+
+# Per-sample concatenations (header from wholePop; rows from the per-gait /
+# per-booksize files). Each sample appears exactly once in each view.
+head -n1 "${roh_common_dir}/roh_common.wholePop.tsv" \
+    > "${roh_common_dir}/roh_common.twoGait.tsv"
+for rg in Trotter Pacer; do
+    tail -n+2 "${roh_common_dir}/roh_common.${rg}.tsv"
+done >> "${roh_common_dir}/roh_common.twoGait.tsv"
+
+# threeBooksize: per_group.sh emits scoring TSVs only for the main gait,
+# not for the six book-size subs. We build the threeBooksize view by
+# joining the gait-level scores with the gait_bookSize factor file so
+# each row carries its book-size label, exactly as the existing
+# Froh_vs_ROHsh aggregation already does for ROH_share.
+awk 'BEGIN{FS=OFS="\t"} \
+     NR==FNR { bs[$2]=$3; next } \
+     FNR==1 { print $0, "gait_bookSize" } \
+     FNR>1  { print $0, (($1 in bs) ? bs[$1] : "undefined") }' \
+    "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize" \
+    "${roh_common_dir}/roh_common.twoGait.tsv" \
+    > "${roh_common_dir}/roh_common.threeBooksize.tsv"
+
+upload "${roh_common_dir}/roh_common.twoGait.tsv"       "ROH/roh_common/"
+upload "${roh_common_dir}/roh_common.threeBooksize.tsv" "ROH/roh_common/"
+
+# Pairwise Mann-Whitney + Cohen's d across the six gait x book_size
+# subgroups for genome-wide ROH_common + 4 length-class scores.
+pairwise_stats="${roh_common_dir}/roh_common_pairwise_stats.tsv"
+run_python scripts/roh_common_pairwise_stats.py \
+    --roh-common "${roh_common_dir}/roh_common.twoGait.tsv" \
+    --froh       "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.txt" \
+    --out        "$pairwise_stats"
+upload "$pairwise_stats" "ROH/roh_common/"
+
+# Per-subgroup mean +/- SD summary (9 rows: wholePop + 2 gaits + 6 gait x book-size).
+# wholePop uses cohort-wide landscape scoring; other rows use within-gait scoring.
+subgroup_summary="${roh_common_dir}/roh_common_subgroup_summary.csv"
+run_python scripts/roh_common_subgroup_summary.py \
+    --wholepop      "${roh_common_dir}/roh_common.wholePop.tsv" \
+    --threebooksize "${roh_common_dir}/roh_common.threeBooksize.tsv" \
+    --out           "$subgroup_summary"
+upload "$subgroup_summary" "ROH/roh_common/"
+
+{
+    # Figure 2 — raw-line Manhattan landscape per group, all five panels
+    # (genome-wide + 4 length classes) in one PNG.
+    for rg in wholePop Trotter Pacer; do
+        out="${roh_common_dir}/Fig2_manhattan.${rg}.png"
+        run_python scripts/roh_common_plot.py manhattan \
+            --landscape-dir "$roh_common_dir" --rg "$rg" --out "$out"
+        upload "$out" "ROH/roh_common/"
+    done
+
+    # Figure 3 — F_ROH vs ROH_common scatter (Pacer / Trotter panels).
+    fig3="${roh_common_dir}/Fig3_FROH_vs_ROHcommon.png"
+    run_python scripts/roh_common_plot.py scatter \
+        --roh-common "${roh_common_dir}/roh_common.twoGait.tsv" \
+        --froh       "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.txt" \
+        --out        "$fig3"
+    upload "$fig3" "ROH/roh_common/"
+
+    # Figure 4 — length-stratified boxplots by book-size.
+    fig4="${roh_common_dir}/Fig4_lengthbox.png"
+    fig4b="${roh_common_dir}/Fig4b_lengthbox.png"
+    run_python scripts/roh_common_plot.py lengthbox \
+        --roh-common "${roh_common_dir}/roh_common.twoGait.tsv" \
+        --froh       "${OUTPUT_DIR}/divStats/roh.L3_Froh_gait_bookSize.txt" \
+        --out        "$fig4" \
+        --nested-out "$fig4b"
+    upload "$fig4"  "ROH/roh_common/"
+    upload "$fig4b" "ROH/roh_common/"
+} &> "${OUTPUT_DIR}/divStats/roh_common.log"

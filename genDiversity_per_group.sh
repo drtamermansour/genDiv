@@ -433,6 +433,38 @@ for sub in "${subs[@]}"; do
 done
 
 ##########################################
+## 7.5 ROH_common: continuous population-autozygosity landscape + per-individual scores
+##########################################
+## Builds a fixed 100 kb window tiling for the main group, counts distinct
+## IIDs per window (n_w), and writes f_w = n_w/N as the "landscape". Then
+## scores each individual against that landscape with an exact leave-one-out
+## correction: ROH_common,i = mean over w in W_i of (n_w - 1)/(N - 1).
+## Length-stratified landscapes (1-3, 3-5, 5-10, >10 Mb) are emitted in parallel.
+
+roh_common_dir="${OUTPUT_DIR}/divStats/roh_common"
+mkdir -p "$roh_common_dir"
+
+run_python scripts/roh_common_landscape.py \
+    --segments-bed "${roh_RG}.${rg}.bed" \
+    --autosomes    "${OUTPUT_DIR}/divStats/autosomes.genome" \
+    --window-kb    "$ROH_COMMON_WINDOW_KB" \
+    --length-bins  "$ROH_COMMON_LENGTH_BINS" \
+    --out-dir      "$roh_common_dir" \
+    --rg           "$rg"
+
+run_python scripts/roh_common_individual.py \
+    --landscape-dir "$roh_common_dir" \
+    --segments-bed  "${roh_RG}.${rg}.bed" \
+    --rg            "$rg" \
+    --out           "${roh_common_dir}/roh_common.${rg}.tsv"
+
+upload "${roh_common_dir}/roh_common.${rg}.tsv" "ROH/roh_common/"
+for variant in "" ".1to3" ".3to5" ".5to10" ".more10"; do
+    f="${roh_common_dir}/landscape.${rg}${variant}.tsv"
+    [[ -f "$f" ]] && upload "$f" "ROH/roh_common/"
+done
+
+##########################################
 ## 8. F_ROH statistic and F_ROH summary
 ##########################################
 ## F_ROH is an inbreeding coefficient based on runs of homozygosity
