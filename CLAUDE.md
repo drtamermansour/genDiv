@@ -79,6 +79,7 @@ Conceptual workflow phases:
 | `summary_nseg_bins.py` | Per-subgroup summary of L3 ROH segment counts binned by length: `NSEG_1to3`, `NSEG_3to5`, `NSEG_5to10`, `NSEG_more10` (Mb, half-open [low, high)). Takes the per-segment `roh.L3.${rg}.txt` and a factor TSV (IID in col 1, factor in last col, same shape as `roh.L3_Froh_gait.txt`) |
 | `summary_grm_kinship.py` | Per-subgroup pairwise GRM kinship summary. Reads the wholePop PLINK2 `.rel` (square) + `.rel.id` and the `USTA_Diversity_Study.gait_bookSize` factor; writes a 9-row mean ± SD CSV of within-subgroup off-diagonal pairwise GRM values (wholePop + 2 gaits + 6 gait × book-size strata) plus a violin plot. Uses the wholePop GRM (single common AF basis) so cross-gait subgroup comparison is on a single yardstick; the same VanRaden additive-genetic similarities feed PLINK2 `--pca`. |
 | `pc_outlier_kinship.py` | Confirms that PC2/PC3/PC4 "hidden familial structure" corresponds to genuine high-kinship clusters. For each PC, identifies the top-N (default 10) individuals at each tail (most positive and most negative loadings) and compares the within-cluster mean off-diagonal pairwise GRM kinship to the cohort mean (≈ 0 by GRM construction). Emits `divStats/PC_outlier_kinship.csv` with one row per (PC, tail). |
+| `summary_ne_roh.py` | ROH-based effective population size (N_e) by length class for each group (wholePop, Trotter, Pacer). Reads per-group L3 segment BEDs + sample lists + the effective autosomal length; for each length class, computes the within-group autozygous fraction *F_ROH(c)* and translates it into *N_e* at the corresponding ancestral generation depth via N_e(t) ≈ 1 / (4 · L_Morgan · F_ROH(c)) (Hayes et al. 2003; Marras et al. 2015), using the EquCab3 mean recombination rate of 1.16 cM/Mb (Beeson et al. 2020) for the cM ↔ Mb conversion. Emits `divStats/Ne_ROH_by_length_class.csv` with one row per (group, length class). |
 | `summary_het.py` | Heterozygosity summary stats (observed/expected, F-coefficients) |
 | `roh_plot.py` | Scatter plots correlating F_ROH vs consensus ROH sharing |
 | `roh_histograms.py` | Unified histogram script: use `--metric ratio` (ROH_shared/F_ROH) or `--metric shared` (Percent_of_Consensus_ROH) |
@@ -165,6 +166,7 @@ genDiversity_aggregate.sh  (runs once)
   → fst_stats.R (reads all 5 FST summaries: 3 whole-pop + 2 per-gait book-size)
   → twoGait / threeBooksize per-sample ROH_sh concatenations
   → Froh-vs-ROHsh plots (wholePop / twoGait / threeBooksize)
+  → Ne_ROH_by_length_class.csv (ROH-based N_e per gait at 4 generation depths)
   → ROH_common: twoGait / threeBooksize per-sample score concatenations +
                 Figures 2-4 (Manhattan landscape, F_ROH vs ROH_common
                 scatter, length-stratified boxplots)

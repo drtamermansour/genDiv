@@ -64,6 +64,24 @@ for gp in wholePop twoGait threeBooksize; do
 done &> "${OUTPUT_DIR}/divStats/roh_sh.log"
 
 ##########################################
+## ROH-based effective population size (N_e) by length class
+##########################################
+## Translates the per-group L3 segment length distribution into N_e at
+## the four ancestral generation depths set by the length classes
+## (>10 Mb ≈ ~3 gen; 5-10 Mb ≈ ~6 gen; 3-5 Mb ≈ ~11 gen; 1-3 Mb ≈ ~22 gen,
+## using Beeson et al. 2020 EquCab3 genome-wide recombination rate of
+## 1.16 cM/Mb). N_e(t) ≈ 1 / (4 * L_Morgan * F_ROH_class) per
+## Hayes et al. 2003 / Marras et al. 2015.
+ne_csv="${OUTPUT_DIR}/divStats/Ne_ROH_by_length_class.csv"
+run_python scripts/summary_ne_roh.py \
+    --group   "wholePop:${OUTPUT_DIR}/divStats/roh.L3.wholePop.bed:${OUTPUT_DIR}/preprocess/samples.wholePop.txt" \
+    --group   "Trotter:${OUTPUT_DIR}/divStats/roh.L3.Trotter.bed:${OUTPUT_DIR}/preprocess/samples.Trotter.txt" \
+    --group   "Pacer:${OUTPUT_DIR}/divStats/roh.L3.Pacer.bed:${OUTPUT_DIR}/preprocess/samples.Pacer.txt" \
+    --autosomal-length-file "${OUTPUT_DIR}/divStats/effective_autosomal_genome_length.txt" \
+    --out     "$ne_csv"
+upload "$ne_csv" "Froh/"
+
+##########################################
 ## ROH_common cross-group concatenations and Figures 2-4
 ##########################################
 ## Each sample is scored against its own group's landscape during per_group.sh.
