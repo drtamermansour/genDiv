@@ -3,6 +3,11 @@
 input_data/
 results_*/
 
+# External tool checkouts (GONE2, future NeEstimator2 / SNeP).
+# Installed via scripts/ne/install_<tool>.sh; reproducible from those
+# scripts rather than from the working-tree blob.
+tools/
+
 # Stray outputs from the pre-refactor layout (safe to delete manually once confirmed unneeded).
 SNPdata_iScan_Standardbred/
 Miscellaneous_documents_standardbred/

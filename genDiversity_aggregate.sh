@@ -64,6 +64,56 @@ for gp in wholePop twoGait threeBooksize; do
 done &> "${OUTPUT_DIR}/divStats/roh_sh.log"
 
 ##########################################
+## LD-decay effective population size (Ne)
+##########################################
+## Modular: each Ne tool wrapper lives at scripts/ne/run_<tool>.sh and is
+## invoked iff its wrapper exists and is executable. Any individual tool
+## can be removed by deleting (or chmod -x) its wrapper file; no other
+## edits are required. Outputs (per-tool subdir + a standardised
+## Ne_<tool>_summary.csv) land under ${OUTPUT_DIR}/divStats/ne/<tool>/.
+##
+## GONE2 (Santiago et al. 2025) consumes the post-QC but NOT LD-pruned
+## PLINK set because its estimator uses the full LD spectrum across
+## recombination-distance bins; LD pruning would discard the signal.
+## NeEstimator and SNeP (when wired) use the LD-pruned set, matching
+## McGivney 2020 / Manunza 2025 standard practice.
+ne_dir="${OUTPUT_DIR}/divStats/ne"
+mkdir -p "$ne_dir"
+filtered_unpruned_prefix="${OUTPUT_DIR}/filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered"
+filtered_pruned_prefix="${OUTPUT_DIR}/LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.norm.phased.LD_prune"
+
+for ne_tool in gone2 neestimator snep; do
+    wrapper="$(dirname "$0")/scripts/ne/run_${ne_tool}.sh"
+    [[ -x "$wrapper" ]] || continue
+    case "$ne_tool" in
+        gone2)
+            bash "$wrapper" \
+                --unpruned-prefix "$filtered_unpruned_prefix" \
+                --group "wholePop:${OUTPUT_DIR}/preprocess/samples.wholePop.txt" \
+                --group "Trotter:${OUTPUT_DIR}/preprocess/samples.Trotter.txt" \
+                --group "Pacer:${OUTPUT_DIR}/preprocess/samples.Pacer.txt" \
+                --out-dir "$ne_dir" \
+                || log "WARNING: Ne tool ${ne_tool} failed (continuing)"
+            ;;
+        neestimator|snep)
+            bash "$wrapper" \
+                --pruned-prefix "$filtered_pruned_prefix" \
+                --group "wholePop:${OUTPUT_DIR}/preprocess/samples.wholePop.txt" \
+                --group "Trotter:${OUTPUT_DIR}/preprocess/samples.Trotter.txt" \
+                --group "Pacer:${OUTPUT_DIR}/preprocess/samples.Pacer.txt" \
+                --out-dir "$ne_dir" \
+                || log "WARNING: Ne tool ${ne_tool} failed (continuing)"
+            ;;
+    esac
+    # Upload all CSVs and STATS artifacts for this tool.
+    if [[ -d "$ne_dir/${ne_tool}" ]]; then
+        for f in "$ne_dir/${ne_tool}"/*.csv "$ne_dir/${ne_tool}"/*/*_Ne "$ne_dir/${ne_tool}"/*/*_STATS; do
+            [[ -f "$f" ]] && upload "$f" "Ne/${ne_tool}/$(basename "$(dirname "$f")")/"
+        done
+    fi
+done
+
+##########################################
 ## ROH_common cross-group concatenations and Figures 2-4
 ##########################################
 ## Each sample is scored against its own group's landscape during per_group.sh.
