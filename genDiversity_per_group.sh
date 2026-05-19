@@ -536,6 +536,47 @@ plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
     --read-freq "$pruned_afreq" \
     --output-chr 'chrM' --out "$grm_prefix"
 
+## 9c. Whole-population pairwise GRM kinship summary by subgroup (wholePop only).
+## Reads the .rel + .rel.id from §9a (built on wholePop allele frequencies)
+## and writes mean +/- SD of within-subgroup pairwise GRM kinship for
+## wholePop + 2 gaits + 6 gait x book-size strata, plus a violin plot of
+## the within-subgroup distributions. The wholePop GRM uses the same
+## VanRaden additive-genetic similarities that PLINK2's --pca consumes
+## internally, so this summary quantifies the kinship structure visible
+## in the PCA on a single common AF basis.
+if [[ "$rg" == "wholePop" ]]; then
+    grm_kinship_csv="${OUTPUT_DIR}/divStats/GRM_kinship_by_subgroup.csv"
+    grm_kinship_plot="${OUTPUT_DIR}/divStats/GRM_kinship_by_subgroup.violin.png"
+    run_python scripts/summary_grm_kinship.py \
+        --rel      "${grm_prefix}.rel" \
+        --rel-id   "${grm_prefix}.rel.id" \
+        --factor   "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize" \
+        --out-csv  "$grm_kinship_csv" \
+        --out-plot "$grm_kinship_plot"
+    upload "$grm_kinship_csv"  "Relatedness/"
+    upload "$grm_kinship_plot" "Relatedness/"
+
+    # §9d: confirm that PC2-PC4 "hidden familial structure" corresponds to
+    # genuine high-kinship clusters. For each of PC2, PC3, PC4, score the
+    # top-10 individuals at each tail (positive and negative) and compare
+    # their within-cluster mean pairwise GRM kinship against the cohort
+    # mean (which is ≈ 0 by GRM construction).
+    pc_kinship_csv="${OUTPUT_DIR}/divStats/PC_outlier_kinship.csv"
+    eigenvec_wholePop="${OUTPUT_DIR}/divStats/filtered.LD_prune.${rg}.pca.eigenvec"
+    if [[ -f "$eigenvec_wholePop" ]]; then
+        run_python scripts/pc_outlier_kinship.py \
+            --eigenvec "$eigenvec_wholePop" \
+            --rel      "${grm_prefix}.rel" \
+            --rel-id   "${grm_prefix}.rel.id" \
+            --pcs      "PC2,PC3,PC4" \
+            --top-n    10 \
+            --out      "$pc_kinship_csv"
+        upload "$pc_kinship_csv" "Relatedness/"
+    else
+        log "WARNING: PC-outlier kinship skipped — eigenvec missing: $eigenvec_wholePop"
+    fi
+fi
+
 ## 9b. Per-group ROHRM + analysis_comparison at every cutoff in $ROH_CUTOFFS
 ## Per-cutoff outputs land at rep_ROHRM/roh_${cutoff%.*}Mb.Threshold_${sd}SD/ with a .${rg}. suffix.
 ## canonical_dir below is the primary-cutoff subfolder, used later in §14

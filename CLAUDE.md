@@ -77,6 +77,8 @@ Conceptual workflow phases:
 | `analysis_comparison.py` | Compares ROHRM vs standard GRM; `RobustMatrixComparator` class |
 | `summary_roh.py` | ROH summary statistics grouped by subpopulation. `-n/--n-numeric-cols N` (default 3) controls how many numeric columns are summarised; the column right after the numeric block is the grouping factor |
 | `summary_nseg_bins.py` | Per-subgroup summary of L3 ROH segment counts binned by length: `NSEG_1to3`, `NSEG_3to5`, `NSEG_5to10`, `NSEG_more10` (Mb, half-open [low, high)). Takes the per-segment `roh.L3.${rg}.txt` and a factor TSV (IID in col 1, factor in last col, same shape as `roh.L3_Froh_gait.txt`) |
+| `summary_grm_kinship.py` | Per-subgroup pairwise GRM kinship summary. Reads the wholePop PLINK2 `.rel` (square) + `.rel.id` and the `USTA_Diversity_Study.gait_bookSize` factor; writes a 9-row mean ± SD CSV of within-subgroup off-diagonal pairwise GRM values (wholePop + 2 gaits + 6 gait × book-size strata) plus a violin plot. Uses the wholePop GRM (single common AF basis) so cross-gait subgroup comparison is on a single yardstick; the same VanRaden additive-genetic similarities feed PLINK2 `--pca`. |
+| `pc_outlier_kinship.py` | Confirms that PC2/PC3/PC4 "hidden familial structure" corresponds to genuine high-kinship clusters. For each PC, identifies the top-N (default 10) individuals at each tail (most positive and most negative loadings) and compares the within-cluster mean off-diagonal pairwise GRM kinship to the cohort mean (≈ 0 by GRM construction). Emits `divStats/PC_outlier_kinship.csv` with one row per (PC, tail). |
 | `summary_het.py` | Heterozygosity summary stats (observed/expected, F-coefficients) |
 | `roh_plot.py` | Scatter plots correlating F_ROH vs consensus ROH sharing |
 | `roh_histograms.py` | Unified histogram script: use `--metric ratio` (ROH_shared/F_ROH) or `--metric shared` (Percent_of_Consensus_ROH) |
@@ -149,6 +151,10 @@ genDiversity_per_group.sh  (runs 3× — wholePop, Trotter, Pacer)
       roh.L3_NSEGbins_{gait,gait_bookSize}.sumStats.csv (NSEG length-bin summaries)
   §9  per-group GRM + ROHRM + analysis_comparison at every $ROH_CUTOFFS cutoff
       → Inbreeding_Comparison.${rg}.csv + Pairwise_Differences.${rg}.csv
+      §9c (wholePop only) per-subgroup pairwise GRM kinship summary →
+      divStats/GRM_kinship_by_subgroup.{csv,violin.png}
+      §9d (wholePop only) PC2-PC4 outlier-cluster kinship confirmation →
+      divStats/PC_outlier_kinship.csv
   §10 per-group KING + IBS + related.${rg} (per-group --make-king-table)
   §11 PCA pairwise Euclidean distance
   §14 cross-method correlation plot (ROHRM vs KING vs PCA)
