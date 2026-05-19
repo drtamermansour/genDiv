@@ -161,3 +161,42 @@ upload "$subgroup_summary" "ROH/roh_common/"
     upload "$fig4"  "ROH/roh_common/"
     upload "$fig4b" "ROH/roh_common/"
 } &> "${OUTPUT_DIR}/divStats/roh_common.log"
+
+##########################################
+## ROH islands: selection-signature candidates from the ROH_common landscapes
+##########################################
+## For each group (wholePop, Trotter, Pacer), threshold the per-window
+## f_w landscape at the top-1% (with absolute f_w >= 0.5 flagged as
+## high-confidence), merge contiguous high-f_w windows allowing small
+## gaps, drop islands narrower than 500 kb, and annotate each island
+## with overlapping Ensembl EquCab3 protein-coding genes. A curated
+## horse-selection candidate-gene list flags islands that overlap
+## known selection loci (DMRT3, MSTN, LCORL/NCAPG, MC1R, KIT, ASIP,
+## STX17, MITF, ...). A cross-group consolidation pass identifies
+## shared (multi-group) vs gait-specific islands.
+roh_islands_dir="${OUTPUT_DIR}/divStats/roh_islands"
+mkdir -p "$roh_islands_dir"
+gtf="$(dirname "$0")/input_data/annotation/Equus_caballus.EquCab3.0.115.gtf.gz"
+candidates="$(dirname "$0")/scripts/horse_selection_candidates.tsv"
+if [[ -f "$gtf" && -f "$candidates" ]]; then
+    run_python scripts/roh_islands_annotate.py \
+        --group   "wholePop:${roh_common_dir}/landscape.wholePop.tsv" \
+        --group   "Trotter:${roh_common_dir}/landscape.Trotter.tsv" \
+        --group   "Pacer:${roh_common_dir}/landscape.Pacer.tsv" \
+        --gtf     "$gtf" \
+        --candidates "$candidates" \
+        --top-percentile     1.0 \
+        --absolute-threshold 0.5 \
+        --max-gap-windows    2 \
+        --min-island-kb      500 \
+        --differential-pair  "Pacer:Trotter" \
+        --differential-top-percentile 1.0 \
+        --out-dir "$roh_islands_dir"
+    for f in "$roh_islands_dir"/roh_islands.*.csv; do
+        upload "$f" "ROH/roh_islands/"
+    done
+else
+    log "WARNING: ROH islands step skipped — annotation files not found at"
+    log "  $gtf"
+    log "  $candidates"
+fi
