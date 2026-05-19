@@ -106,6 +106,9 @@ def main():
         )
         seg_df["size_mb"] = (seg_df["end"] - seg_df["start"]) / 1e6
 
+        # Per-class rows.
+        class_f_roh_sum = 0.0
+        class_n_seg_sum = 0
         for low_mb, high_mb, bin_label in bins:
             if np.isinf(high_mb):
                 mask = seg_df["size_mb"] >= low_mb
@@ -143,6 +146,43 @@ def main():
                 "F_ROH_class": f"{f_roh_class:.4f}" if not np.isnan(f_roh_class) else "NA",
                 "Ne": f"{ne:.0f}" if not np.isnan(ne) else "NA",
             })
+
+            if not np.isnan(f_roh_class):
+                class_f_roh_sum += f_roh_class
+            class_n_seg_sum += n_seg
+
+        # Group-level sanity-check row: F_ROH computed independently across
+        # the full L3 BED versus the sum of per-class F_ROH(c). The two
+        # should match by construction (the length classes partition all
+        # L3 segments); any mismatch flags a binning or filter bug.
+        n_seg_total_bed = int(len(seg_df))
+        f_roh_total_bed = (float(seg_df["size_mb"].sum()) * 1e6
+                           / (n_animals * aut_len_bp)
+                           if n_animals else float("nan"))
+        match_flag = (
+            "OK"
+            if (not np.isnan(f_roh_total_bed)
+                and abs(class_f_roh_sum - f_roh_total_bed) < 1e-6
+                and class_n_seg_sum == n_seg_total_bed)
+            else "MISMATCH"
+        )
+        rows.append({
+            "Group": label,
+            "Length_class": (
+                f"Total (>=1 Mb, sanity check, Sum_class vs BED-total: "
+                f"{match_flag})"
+            ),
+            "N_animals": n_animals,
+            "N_segments": n_seg_total_bed,
+            "Mean_segment_length_Mb": "NA",
+            "Mean_segment_length_cM": "NA",
+            "Generation_depth_t": "NA",
+            "F_ROH_class": (
+                f"{f_roh_total_bed:.4f}"
+                if not np.isnan(f_roh_total_bed) else "NA"
+            ),
+            "Ne": "NA",
+        })
 
     out_df = pd.DataFrame(rows)
     out_path = Path(args.out)
