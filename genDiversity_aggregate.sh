@@ -82,7 +82,7 @@ mkdir -p "$ne_dir"
 filtered_unpruned_prefix="${OUTPUT_DIR}/filtered/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered"
 filtered_pruned_prefix="${OUTPUT_DIR}/LD_pruned/USTA_Diversity_Study.remap.refAlleles.dedup.plink1.filtered.norm.phased.LD_prune"
 
-for ne_tool in gone2 neestimator snep; do
+for ne_tool in gone2 currentne2 neestimator snep; do
     wrapper="$(dirname "$0")/scripts/ne/run_${ne_tool}.sh"
     [[ -x "$wrapper" ]] || continue
     case "$ne_tool" in
@@ -95,7 +95,7 @@ for ne_tool in gone2 neestimator snep; do
                 --out-dir "$ne_dir" \
                 || log "WARNING: Ne tool ${ne_tool} failed (continuing)"
             ;;
-        neestimator|snep)
+        currentne2|neestimator|snep)
             bash "$wrapper" \
                 --pruned-prefix "$filtered_pruned_prefix" \
                 --group "wholePop:${OUTPUT_DIR}/preprocess/samples.wholePop.txt" \
@@ -117,6 +117,7 @@ for ne_tool in gone2 neestimator snep; do
         #   GONE2:       *_GONE2_Ne   *_GONE2_STATS   *_GONE2_d2
         #   NeEstimator: input.*Ne.txt  input.*NexLD.txt  info.*.txt  options.*.txt
         #   SNeP:        *.NeAll   *.LDAll   *SNeP.log
+        #   currentNe2:  *_currentNe2_OUTPUT.txt
         #   All tools:   *.log
         for f in "$ne_dir/${ne_tool}"/*/*_Ne \
                  "$ne_dir/${ne_tool}"/*/*_STATS \
@@ -127,6 +128,7 @@ for ne_tool in gone2 neestimator snep; do
                  "$ne_dir/${ne_tool}"/*/options.*.txt \
                  "$ne_dir/${ne_tool}"/*/*.NeAll \
                  "$ne_dir/${ne_tool}"/*/*.LDAll \
+                 "$ne_dir/${ne_tool}"/*/*_currentNe2_OUTPUT.txt \
                  "$ne_dir/${ne_tool}"/*/*.log; do
             [[ -f "$f" ]] && upload "$f" "Ne/${ne_tool}/$(basename "$(dirname "$f")")/"
         done
