@@ -39,6 +39,10 @@ __pycache__/
 .idea/
 *.swp
 
+# NFS stale-lock shadows (created when a file is deleted while still open
+# by another process; cleaned up by the kernel eventually).
+.nfs*
+
 # Development-only re-runner for the ROH_common stage. This is a throwaway
 # convenience that inlines per_group.sh §7.5 + aggregate.sh ROH_common block
 # so the metric can be re-computed against an existing OUTPUT_DIR without
