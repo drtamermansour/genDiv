@@ -105,9 +105,29 @@ for ne_tool in gone2 neestimator snep; do
                 || log "WARNING: Ne tool ${ne_tool} failed (continuing)"
             ;;
     esac
-    # Upload all CSVs and STATS artifacts for this tool.
+    # Upload outputs for this tool: combined summary CSV at the top level,
+    # plus per-group raw trajectories, summary STATS, and the recombination-
+    # bin LD diagnostic + tool log for downstream debugging / reviewer
+    # verification.
     if [[ -d "$ne_dir/${ne_tool}" ]]; then
-        for f in "$ne_dir/${ne_tool}"/*.csv "$ne_dir/${ne_tool}"/*/*_Ne "$ne_dir/${ne_tool}"/*/*_STATS; do
+        for f in "$ne_dir/${ne_tool}"/*.csv; do
+            [[ -f "$f" ]] && upload "$f" "Ne/${ne_tool}/"
+        done
+        # Tool-specific small diagnostic files:
+        #   GONE2:       *_GONE2_Ne   *_GONE2_STATS   *_GONE2_d2
+        #   NeEstimator: input.*Ne.txt  input.*NexLD.txt  info.*.txt  options.*.txt
+        #   SNeP:        *.NeAll   *.LDAll   *SNeP.log
+        #   All tools:   *.log
+        for f in "$ne_dir/${ne_tool}"/*/*_Ne \
+                 "$ne_dir/${ne_tool}"/*/*_STATS \
+                 "$ne_dir/${ne_tool}"/*/*_d2 \
+                 "$ne_dir/${ne_tool}"/*/*Ne.txt \
+                 "$ne_dir/${ne_tool}"/*/*NexLD.txt \
+                 "$ne_dir/${ne_tool}"/*/info.*.txt \
+                 "$ne_dir/${ne_tool}"/*/options.*.txt \
+                 "$ne_dir/${ne_tool}"/*/*.NeAll \
+                 "$ne_dir/${ne_tool}"/*/*.LDAll \
+                 "$ne_dir/${ne_tool}"/*/*.log; do
             [[ -f "$f" ]] && upload "$f" "Ne/${ne_tool}/$(basename "$(dirname "$f")")/"
         done
     fi
