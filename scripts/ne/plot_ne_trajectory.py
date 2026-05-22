@@ -38,11 +38,19 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 GROUP_ORDER = ["wholePop", "Trotter", "Pacer"]
-GROUP_STYLE = {
-    "wholePop": {"color": "#2C3E50", "linestyle": "-", "marker": "o", "label": "wholePop"},
-    "Trotter":  {"color": "#1F77B4", "linestyle": "-", "marker": "s", "label": "Trotter"},
-    "Pacer":    {"color": "#D62728", "linestyle": "-", "marker": "^", "label": "Pacer"},
+GROUP_COLOR = {
+    "wholePop": "#2C3E50",
+    "Trotter":  "#1F77B4",
+    "Pacer":    "#D62728",
 }
+GROUP_MARKER = {
+    "wholePop": "o",
+    "Trotter":  "s",
+    "Pacer":    "^",
+}
+# When multiple Methods are present, cycle through these linestyles so each
+# (Group, Method) pair becomes a distinct line in the plot.
+METHOD_LINESTYLES = ["-", "--", ":", "-."]
 
 # Standardbred-specific historical reference events. Each entry is
 # (year, label, line-style-hint, vertical-anchor 0-1 for label y).
@@ -101,15 +109,31 @@ def _ordered_groups(present: list[str]) -> list[str]:
     return out
 
 
-def _plot_lines(ax, df, groups):
+def _plot_lines(ax, df, groups, methods=None):
+    """Plot one line per (group, method) pair. Color encodes group,
+    linestyle encodes method. When only one method is present the
+    linestyle defaults to solid; with multiple methods we cycle through
+    METHOD_LINESTYLES so each method gets a distinct style."""
+    if methods is None or len(methods) <= 1:
+        method_linestyle = {(methods[0] if methods else None): METHOD_LINESTYLES[0]}
+    else:
+        method_linestyle = {m: METHOD_LINESTYLES[i % len(METHOD_LINESTYLES)]
+                            for i, m in enumerate(methods)}
     for g in groups:
-        sub = df[df["Group"] == g].sort_values("Generations_ago")
-        if sub.empty:
-            continue
-        style = GROUP_STYLE.get(g, {"color": "grey", "linestyle": "-",
-                                    "marker": "o", "label": g})
-        ax.plot(sub["Generations_ago"], sub["Ne"],
-                linewidth=1.6, markersize=4.5, alpha=0.95, **style)
+        for m, ls in method_linestyle.items():
+            if m is None:
+                sub = df[df["Group"] == g].sort_values("Generations_ago")
+            else:
+                sub = df[(df["Group"] == g) & (df["Method"] == m)].sort_values("Generations_ago")
+            if sub.empty:
+                continue
+            color = GROUP_COLOR.get(g, "grey")
+            marker = GROUP_MARKER.get(g, "o")
+            label = g if (m is None or len(method_linestyle) == 1) else f"{g} ({m})"
+            ax.plot(sub["Generations_ago"], sub["Ne"],
+                    color=color, linestyle=ls, marker=marker,
+                    linewidth=1.6, markersize=4.0, alpha=0.95,
+                    label=label)
 
 
 def _draw_artifact_band(ax, min_gen, artifact_max_gen, label_y_pos=None,
@@ -218,7 +242,7 @@ def plot_log_x(args, df, methods, groups):
     """Single-panel log-x layout (legacy)."""
     G, yr = args.gen_time, args.current_year
     fig, ax = plt.subplots(figsize=(8.5, 5.5))
-    _plot_lines(ax, df, groups)
+    _plot_lines(ax, df, groups, methods=list(methods))
     ax.set_xscale("log")
     if not args.linear_y:
         ax.set_yscale("log")
@@ -248,7 +272,7 @@ def plot_broken(args, df, methods, groups):
                      "wspace": 0.05},
     )
     for ax in (ax_l, ax_r):
-        _plot_lines(ax, df, groups)
+        _plot_lines(ax, df, groups, methods=list(methods))
         if not args.linear_y:
             ax.set_yscale("log")
         ax.grid(True, which="both", linestyle=":", alpha=0.30)

@@ -43,6 +43,15 @@ REC_RATE="1.16"
 THREADS="8"
 MAF="0.05"
 GONE2_BIN="${GONE2_BIN:-}"
+METAPOPULATION=0          # GONE2 -x: assume sample is from a metapopulation
+                          # with subpopulations of equal size. Default off
+                          # (panmixia); pass --metapopulation to enable.
+OUTPUT_SUBDIR="gone2"     # Tool sub-directory under --out-dir. Override to
+                          # e.g. gone2_x when running a sensitivity analysis
+                          # with -x without clobbering the panmixia outputs.
+METHOD_LABEL="GONE2"      # Label used in the standardised summary CSV's
+                          # Method column. Override to e.g. GONE2_x so the
+                          # downstream plotter / summary can distinguish.
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -56,6 +65,9 @@ while [[ $# -gt 0 ]]; do
         --rec-rate-cm-mb)  REC_RATE="$2"; shift 2 ;;
         --threads)         THREADS="$2"; shift 2 ;;
         --maf)             MAF="$2"; shift 2 ;;
+        --metapopulation)  METAPOPULATION=1; shift ;;
+        --output-subdir)   OUTPUT_SUBDIR="$2"; shift 2 ;;
+        --method-label)    METHOD_LABEL="$2"; shift 2 ;;
         *) echo "[run_gone2] unknown flag: $1" >&2; exit 64 ;;
     esac
 done
@@ -73,8 +85,8 @@ if [[ ! -x "$GONE2_BIN" ]]; then
     exit 2
 fi
 
-mkdir -p "$OUT_DIR/gone2"
-summary_csv="$OUT_DIR/gone2/Ne_gone2_summary.csv"
+mkdir -p "$OUT_DIR/$OUTPUT_SUBDIR"
+summary_csv="$OUT_DIR/$OUTPUT_SUBDIR/Ne_${OUTPUT_SUBDIR}_summary.csv"
 echo "Group,Method,Generations_ago,Ne,CI_low_95,CI_high_95" > "$summary_csv"
 
 for spec in "${GROUP_SPECS[@]}"; do
@@ -84,7 +96,7 @@ for spec in "${GROUP_SPECS[@]}"; do
         echo "[run_gone2] WARNING: samples file empty/missing for $label: $samples" >&2
         continue
     fi
-    grp_dir="$OUT_DIR/gone2/$label"
+    grp_dir="$OUT_DIR/$OUTPUT_SUBDIR/$label"
     mkdir -p "$grp_dir"
 
     # 1. Subset PLINK to this group's samples; convert to PED/MAP for GONE2.
@@ -99,26 +111,43 @@ for spec in "${GROUP_SPECS[@]}"; do
     #    placed it there. -r sets a constant cM/Mb rate (we use the EquCab3
     #    genome-wide mean of 1.16 cM/Mb per Beeson et al. 2020); -g 0 forces
     #    unphased-diploid mode (default); -M screens MAF; -t parallel threads.
+    # -x: assumes the sample is from a metapopulation with subpopulations of
+    #    equal size (Santiago 2025). Off by default (panmixia).
     log_file="$grp_dir/gone2.${label}.log"
-    "$GONE2_BIN" -g 0 -r "$REC_RATE" -t "$THREADS" -M "$MAF" \
-                 -o "$grp_dir/${label}" \
-                 "$grp_prefix.ped" > "$log_file" 2>&1
+    gone2_args=( -g 0 -r "$REC_RATE" -t "$THREADS" -M "$MAF" -o "$grp_dir/${label}" )
+    [[ "$METAPOPULATION" == "1" ]] && gone2_args+=( -x )
+    gone2_args+=( "$grp_prefix.ped" )
+    "$GONE2_BIN" "${gone2_args[@]}" > "$log_file" 2>&1
 
-    # GONE2 v1.0.x writes output as ${label}_GONE2_Ne (the binary's actual
-    # naming, despite the --help saying "_GONE_Ne").
-    ne_file="$grp_dir/${label}_GONE2_Ne"
+    # GONE2 writes output as either ${label}_GONE2_Ne (panmixia / default)
+    # or ${label}_GONE2_Ne_mix (-x metapopulation mode). The two formats
+    # differ — see standardisation block below.
+    if [[ "$METAPOPULATION" == "1" ]]; then
+        ne_file="$grp_dir/${label}_GONE2_Ne_mix"
+    else
+        ne_file="$grp_dir/${label}_GONE2_Ne"
+    fi
     if [[ ! -s "$ne_file" ]]; then
-        echo "[run_gone2] WARNING: $label produced no _GONE2_Ne file; check log:" >&2
+        echo "[run_gone2] WARNING: $label produced no Ne file ($ne_file); check log:" >&2
         echo "[run_gone2]   $log_file" >&2
         continue
     fi
 
-    # Standardise the trajectory into the shared CSV. *_GONE2_Ne is
-    # whitespace-separated with two columns (generations_ago, Ne) plus a
-    # brief header we skip.
-    awk -v g="$label" 'BEGIN{OFS=","} \
-        /^[0-9]/ { printf "%s,GONE2,%s,%s,NA,NA\n", g, $1, $2 }' \
-        "$ne_file" >> "$summary_csv"
+    # Standardise the trajectory into the shared CSV.
+    #   *_GONE2_Ne     (panmixia):       2 cols — Generation, Ne_diploids.
+    #   *_GONE2_Ne_mix (metapopulation): 5 cols — Rec_rate_bin, generation,
+    #     N_T_metapop, Ne_metapop, d2_metapop, preceded by a multi-line
+    #     metadata block (Number of subpopulations / FST / migration rate).
+    # We pick the right columns by format.
+    if [[ "$METAPOPULATION" == "1" ]]; then
+        awk -v g="$label" -v m="$METHOD_LABEL" 'BEGIN{OFS=","} \
+            /^[0-9.]/ && NF >= 4 { printf "%s,%s,%s,%s,NA,NA\n", g, m, $2, $4 }' \
+            "$ne_file" >> "$summary_csv"
+    else
+        awk -v g="$label" -v m="$METHOD_LABEL" 'BEGIN{OFS=","} \
+            /^[0-9]/ { printf "%s,%s,%s,%s,NA,NA\n", g, m, $1, $2 }' \
+            "$ne_file" >> "$summary_csv"
+    fi
 
     echo "[run_gone2] $label: GONE2 done — $(wc -l < "$ne_file" | tr -d " ") rows in $ne_file"
 done
