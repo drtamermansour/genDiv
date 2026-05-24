@@ -32,8 +32,11 @@
 #   * input.<group>NexLD.txt      Ne2x extra LD-method output (per-locus etc.)
 #
 # Plus a combined standardised CSV at <dir>/neestimator/Ne_neestimator_summary.csv
-# with columns Group, Method, Generations_ago, Ne, CI_low_95, CI_high_95
-# (Generations_ago = "contemporary"; CIs from the jackknife method).
+# with columns Group, Method, Generations_ago, Ne, CI_level, CI_low, CI_high.
+# Generations_ago = "contemporary"; CI_level is one of "95_jackknife"
+# (if --jackknife was passed and the jackknife block was parsed),
+# "95_parametric" (default — parametric CI is always computed by Ne2x),
+# or "NA" if no CI could be parsed.
 set -eo pipefail
 
 PRUNED_PREFIX=""
@@ -81,7 +84,11 @@ fi
 
 mkdir -p "$OUT_DIR/neestimator"
 summary_csv="$OUT_DIR/neestimator/Ne_neestimator_summary.csv"
-echo "Group,Method,Generations_ago,Ne,CI_low_95,CI_high_95" > "$summary_csv"
+# Standardised summary CSV header (shared across all Ne wrappers).
+# CI_level: "95_jackknife" (jackknife enabled and jackknife block parsed),
+# "95_parametric" (parametric CI, either by --no-jackknife or fallback),
+# or "NA" when no CI could be parsed.
+echo "Group,Method,Generations_ago,Ne,CI_level,CI_low,CI_high" > "$summary_csv"
 
 for spec in "${GROUP_SPECS[@]}"; do
     label="${spec%%:*}"
@@ -211,26 +218,29 @@ OPT
                   tolower($0) ~ re {found=1}' "$ne_out"
         fi
     }
+    # Try jackknife first (preferred when it was computed); fall back to
+    # parametric. Track which block we actually parsed so we can emit the
+    # right CI_level into the standardised CSV.
+    ci_level="95_jackknife"
     ci_lo=$(_parse_ci_block "jackknife on samples" lo)
     ci_hi=$(_parse_ci_block "jackknife on samples" hi)
     if [[ -z "$ci_lo" || -z "$ci_hi" ]]; then
         # Jackknife block not present (disabled in options). Fall back to
         # parametric CI.
+        ci_level="95_parametric"
         ci_lo=$(_parse_ci_block "^[[:space:]]*\\\\* parametric" lo)
         ci_hi=$(_parse_ci_block "^[[:space:]]*\\\\* parametric" hi)
     fi
     [[ -z "$ne_val" ]] && ne_val="NA"
     [[ -z "$ci_lo" ]] && ci_lo="NA"
     [[ -z "$ci_hi" ]] && ci_hi="NA"
-    printf "%s,NeEstimator_LD,contemporary,%s,%s,%s\n" \
-        "$label" "$ne_val" "$ci_lo" "$ci_hi" >> "$summary_csv"
-
-    if [[ "$JACKKNIFE" == "1" ]]; then
-        ci_label="95% jackknife CI"
-    else
-        ci_label="95% parametric CI"
+    if [[ "$ci_lo" == "NA" && "$ci_hi" == "NA" ]]; then
+        ci_level="NA"
     fi
-    echo "[run_neestimator] $label: Ne=$ne_val ($ci_label: $ci_lo - $ci_hi)"
+    printf "%s,NeEstimator_LD,contemporary,%s,%s,%s,%s\n" \
+        "$label" "$ne_val" "$ci_level" "$ci_lo" "$ci_hi" >> "$summary_csv"
+
+    echo "[run_neestimator] $label: Ne=$ne_val (CI_level=$ci_level, CI=$ci_lo - $ci_hi)"
 done
 
 echo "[run_neestimator] summary written to $summary_csv"

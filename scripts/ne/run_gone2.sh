@@ -30,10 +30,10 @@
 #   <out-dir>/gone2/Ne_gone2_summary.csv
 #                                      Standardised per-group N_e trajectory
 #                                      with columns Group, Method,
-#                                      Generations_ago, Ne. (No native CIs
-#                                      from GONE2; CI_low_95 and CI_high_95
-#                                      are emitted as NA for compatibility
-#                                      with other Ne wrappers.)
+#                                      Generations_ago, Ne, CI_level,
+#                                      CI_low, CI_high. (No native CIs
+#                                      from GONE2; CI_level/CI_low/CI_high
+#                                      are all emitted as NA.)
 set -eo pipefail
 
 UNPRUNED_PREFIX=""
@@ -87,7 +87,13 @@ fi
 
 mkdir -p "$OUT_DIR/$OUTPUT_SUBDIR"
 summary_csv="$OUT_DIR/$OUTPUT_SUBDIR/Ne_${OUTPUT_SUBDIR}_summary.csv"
-echo "Group,Method,Generations_ago,Ne,CI_low_95,CI_high_95" > "$summary_csv"
+# Standardised summary CSV header (shared across all Ne wrappers in this
+# pipeline). CI_level records what level the CI bounds correspond to and
+# how they were computed, so a downstream reader can distinguish
+# parametric-95% (NeEstimator), jackknife-95% (NeEstimator with
+# --jackknife), 90% (currentNe2), or NA (GONE2 / GONE2_x / SNeP, which do
+# not emit CIs natively).
+echo "Group,Method,Generations_ago,Ne,CI_level,CI_low,CI_high" > "$summary_csv"
 
 for spec in "${GROUP_SPECS[@]}"; do
     label="${spec%%:*}"
@@ -141,11 +147,11 @@ for spec in "${GROUP_SPECS[@]}"; do
     # We pick the right columns by format.
     if [[ "$METAPOPULATION" == "1" ]]; then
         awk -v g="$label" -v m="$METHOD_LABEL" 'BEGIN{OFS=","} \
-            /^[0-9.]/ && NF >= 4 { printf "%s,%s,%s,%s,NA,NA\n", g, m, $2, $4 }' \
+            /^[0-9.]/ && NF >= 4 { printf "%s,%s,%s,%s,NA,NA,NA\n", g, m, $2, $4 }' \
             "$ne_file" >> "$summary_csv"
     else
         awk -v g="$label" -v m="$METHOD_LABEL" 'BEGIN{OFS=","} \
-            /^[0-9]/ { printf "%s,%s,%s,%s,NA,NA\n", g, m, $1, $2 }' \
+            /^[0-9]/ { printf "%s,%s,%s,%s,NA,NA,NA\n", g, m, $1, $2 }' \
             "$ne_file" >> "$summary_csv"
     fi
 

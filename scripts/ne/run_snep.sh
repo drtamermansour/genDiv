@@ -36,8 +36,9 @@
 #   * <group>.snep.log            SNeP stdout/stderr log
 #
 # Plus a combined CSV at <dir>/snep/Ne_snep_summary.csv with columns
-# Group, Method, Generations_ago, Ne, CI_low_95, CI_high_95 (CIs NA -
-# SNeP does not emit per-bin CIs natively).
+# Group, Method, Generations_ago, Ne, CI_level, CI_low, CI_high. CI_level
+# / CI_low / CI_high are all NA because SNeP does not emit per-bin CIs
+# natively.
 set -eo pipefail
 
 PRUNED_PREFIX=""
@@ -81,7 +82,10 @@ fi
 
 mkdir -p "$OUT_DIR/snep"
 summary_csv="$OUT_DIR/snep/Ne_snep_summary.csv"
-echo "Group,Method,Generations_ago,Ne,CI_low_95,CI_high_95" > "$summary_csv"
+# Standardised summary CSV header (shared across all Ne wrappers).
+# SNeP does not emit per-bin CIs natively, so CI_level / CI_low / CI_high
+# are all NA in this tool's rows.
+echo "Group,Method,Generations_ago,Ne,CI_level,CI_low,CI_high" > "$summary_csv"
 
 for spec in "${GROUP_SPECS[@]}"; do
     label="${spec%%:*}"
@@ -154,13 +158,13 @@ for spec in "${GROUP_SPECS[@]}"; do
                 gen_idx = 1; ne_idx = 2
                 if ($1+0 == $1) {
                     # First row is already numeric (no header) — emit it.
-                    printf "%s,SNeP,%s,%s,NA,NA\n", g, $gen_idx, $ne_idx
+                    printf "%s,SNeP,%s,%s,NA,NA,NA\n", g, $gen_idx, $ne_idx
                 }
                 next
             }
             next
         }
-        $1+0 == $1 { printf "%s,SNeP,%s,%s,NA,NA\n", g, $gen_idx, $ne_idx }
+        $1+0 == $1 { printf "%s,SNeP,%s,%s,NA,NA,NA\n", g, $gen_idx, $ne_idx }
     ' "$ne_file" >> "$summary_csv"
 
     nrows=$(($(wc -l < "$ne_file") - 1))

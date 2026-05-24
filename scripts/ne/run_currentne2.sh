@@ -31,7 +31,10 @@
 #   * currentne2.<group>.log              stdout/stderr log
 #
 # Plus a combined CSV at <dir>/currentne2/Ne_currentne2_summary.csv with
-# columns Group, Method, Generations_ago, Ne, CI_low_95, CI_high_95.
+# columns Group, Method, Generations_ago, Ne, CI_level, CI_low, CI_high.
+# CI_level is "90" because currentNe2 natively emits 50% and 90% CIs (we
+# record the 90% values). The CI_level column was introduced specifically
+# to prevent the 90% values from being silently read as 95% intervals.
 set -eo pipefail
 
 PRUNED_PREFIX=""
@@ -72,7 +75,10 @@ fi
 
 mkdir -p "$OUT_DIR/currentne2"
 summary_csv="$OUT_DIR/currentne2/Ne_currentne2_summary.csv"
-echo "Group,Method,Generations_ago,Ne,CI_low_95,CI_high_95" > "$summary_csv"
+# Standardised summary CSV header (shared across all Ne wrappers).
+# currentNe2 natively emits 50% and 90% CIs (not 95%); CI_level records
+# this so the values are not silently misread as 95% intervals downstream.
+echo "Group,Method,Generations_ago,Ne,CI_level,CI_low,CI_high" > "$summary_csv"
 
 for spec in "${GROUP_SPECS[@]}"; do
     label="${spec%%:*}"
@@ -121,9 +127,9 @@ for spec in "${GROUP_SPECS[@]}"; do
     #    Following Santiago 2025, we report the inter-chromosomal value
     #    as the primary contemporary Ne (purer because no within-chromosome
     #    LD-decay contamination). CIs reported by currentNe2 are 50% and
-    #    90% — we take the 90% values; they live in the CI_low_95 /
-    #    CI_high_95 columns of the standardised summary CSV (column names
-    #    are kept for cross-tool consistency; see CI_level column).
+    #    90% (not 95%); we take the 90% values and write them into the
+    #    standardised summary CSV alongside an explicit CI_level=90
+    #    column so the values cannot be misread as 95% intervals.
     #    The file layout has each label on a "#" line followed by the
     #    numeric value on the next non-comment line.
     parse_block_value() {
@@ -146,10 +152,14 @@ for spec in "${GROUP_SPECS[@]}"; do
     [[ -z "$ci_lo" ]]  && ci_lo="NA"
     [[ -z "$ci_hi" ]]  && ci_hi="NA"
     [[ -z "$ne_val_whole" ]] && ne_val_whole="NA"
-    printf "%s,currentNe2,contemporary,%s,%s,%s\n" \
-        "$label" "$ne_val" "$ci_lo" "$ci_hi" >> "$summary_csv"
+    ci_level="90"
+    if [[ "$ci_lo" == "NA" && "$ci_hi" == "NA" ]]; then
+        ci_level="NA"
+    fi
+    printf "%s,currentNe2,contemporary,%s,%s,%s,%s\n" \
+        "$label" "$ne_val" "$ci_level" "$ci_lo" "$ci_hi" >> "$summary_csv"
 
-    echo "[run_currentne2] $label: Ne_interchrom=$ne_val (90% CI: $ci_lo - $ci_hi); Ne_wholegenome=$ne_val_whole"
+    echo "[run_currentne2] $label: Ne_interchrom=$ne_val (CI_level=$ci_level, CI=$ci_lo - $ci_hi); Ne_wholegenome=$ne_val_whole"
 done
 
 echo "[run_currentne2] summary written to $summary_csv"
