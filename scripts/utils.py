@@ -14,5 +14,5 @@ def format_stats(group_df, columns):
     for col in columns:
         m = group_df[col].mean()
         s = group_df[col].std()
-        results[col] = f"{m:.2f} +/- {s:.2f}"
+        results[col] = f"{m:.4f} +/- {s:.4f}"
     return results
