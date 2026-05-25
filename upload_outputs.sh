@@ -123,10 +123,8 @@ for rg in wholePop Trotter Pacer; do
     # §4 per-group .het (F_SNP)
     push "${het_rg_prefix}.het" "het_and_COI"
 
-    # §4b wholePop-only stratified .het summaries
-    if [[ "$rg" == "wholePop" ]]; then
-        push_glob "${OUTPUT_DIR}/divStats" "filtered.LD_prune.het_stats.het.wGait*" "het_and_COI"
-    fi
+    # §4b per-group stratified .het summaries (wholePop + Trotter + Pacer baselines)
+    push_glob "${OUTPUT_DIR}/divStats" "filtered.LD_prune.het_stats.${rg}.het.wGait*" "het_and_COI"
 
     # §5 PCA COI overlay
     push "${OUTPUT_DIR}/divStats/pca_plot_inbreeding.${rg}.png" "PCA"

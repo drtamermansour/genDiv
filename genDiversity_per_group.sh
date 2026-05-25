@@ -240,28 +240,30 @@ plink2 --bfile "$pl1_pruned" --chr-set 31 no-y no-xy no-mt --allow-extra-chr \
 rclone -v copy "${het_rg_prefix}.het" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/het_and_COI/" --drive-shared-with-me
 
 ##########################################
-## 4b. Whole-pop .het × gait / gait_bookSize stratified summaries (wholePop only)
+## 4b. Per-group .het × gait / gait_bookSize stratified summaries (all $rg)
 ##########################################
-## Joins the whole-pop per-sample .het (just produced above) with the global
-## gait / gait_bookSize metadata from shared.sh, then runs summary_het.py on
-## each stratification. Only uses wholePop inputs, so runs once.
-if [[ "$rg" == "wholePop" ]]; then
-    awk 'BEGIN{FS=OFS="\t";a["IID"]="Gait"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' \
-        "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait" "${het_rg_prefix}.het" \
-        > "${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait"
-    python scripts/summary_het.py \
-        -i "${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait" \
-        -o "${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait.sumStats.csv"
+## Joins the current group's per-sample .het (just produced above) with the
+## global gait / gait_bookSize metadata, then runs summary_het.py on each
+## stratification. Runs for each $rg so within-gait F_SNP (against own-gait
+## AF baseline; rg=Trotter or Pacer) is reported alongside the wholePop-baseline
+## values (rg=wholePop). The wGait stratification is trivial for the per-gait
+## runs (single group) but the wGait_bookSize stratification produces the
+## within-gait book-size-stratified F_SNP values used in the manuscript.
+awk 'BEGIN{FS=OFS="\t";a["IID"]="Gait"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' \
+    "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait" "${het_rg_prefix}.het" \
+    > "${het_rg_prefix}.het.wGait"
+python scripts/summary_het.py \
+    -i "${het_rg_prefix}.het.wGait" \
+    -o "${het_rg_prefix}.het.wGait.sumStats.csv"
 
-    awk 'BEGIN{FS=OFS="\t";a["IID"]="Gait"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' \
-        "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize" "${het_rg_prefix}.het" \
-        > "${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait_bookSize"
-    python scripts/summary_het.py \
-        -i "${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait_bookSize" \
-        -o "${OUTPUT_DIR}/divStats/filtered.LD_prune.het_stats.het.wGait_bookSize.sumStats.csv"
+awk 'BEGIN{FS=OFS="\t";a["IID"]="Gait"}NR==FNR{a[$2]=$3;next}{if(a[$2])print $0,a[$2];else print $0,"undefined";}' \
+    "${OUTPUT_DIR}/preprocess/USTA_Diversity_Study.gait_bookSize" "${het_rg_prefix}.het" \
+    > "${het_rg_prefix}.het.wGait_bookSize"
+python scripts/summary_het.py \
+    -i "${het_rg_prefix}.het.wGait_bookSize" \
+    -o "${het_rg_prefix}.het.wGait_bookSize.sumStats.csv"
 
-    rclone -v copy "${OUTPUT_DIR}/divStats" --include "filtered.LD_prune.het_stats.het.wGait*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/het_and_COI/" --drive-shared-with-me
-fi
+rclone -v copy "${OUTPUT_DIR}/divStats" --include "filtered.LD_prune.het_stats.${rg}.het.wGait*" "remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs/het_and_COI/" --drive-shared-with-me
 
 ##########################################
 ## 5. PCA COI overlay (uses this group's own .het)
