@@ -6,10 +6,11 @@ Five metrics: ROH_common (>=1 Mb genome-wide) + ROH_common_{1to3,3to5,
 
 Output TSV columns:
     group_A group_B metric n_A n_B mean_A mean_B median_A median_B
-    stat p_value p_adj_BH cohens_d
+    stat p_value p_adj_bonferroni cohens_d
 
-p_adj_BH is the Benjamini-Hochberg FDR-adjusted p-value computed within
-each metric (15 tests per family). stat = Mann-Whitney U for sample A.
+p_adj_bonferroni is the Bonferroni FWER-adjusted p-value computed within
+each metric (15 tests per family): p_adj = min(p * m, 1) with m the number
+of tested pairs in the family. stat = Mann-Whitney U for sample A.
 """
 
 import argparse
@@ -48,24 +49,17 @@ def cohens_d(a, b):
     return (float(np.mean(a)) - float(np.mean(b))) / np.sqrt(pooled)
 
 
-def bh_adjust(pvals):
-    """Benjamini-Hochberg FDR adjustment. Returns adjusted p-values in the
-    original input order; NaN inputs stay NaN."""
+def bonferroni_adjust(pvals):
+    """Bonferroni FWER adjustment within a family: p_adj = min(p * m, 1),
+    where m is the number of non-NaN tests in the family. Returns adjusted
+    p-values in the original input order; NaN inputs stay NaN."""
     p = np.asarray(pvals, dtype=float)
     out = np.full_like(p, np.nan, dtype=float)
     mask = ~np.isnan(p)
-    if not mask.any():
+    m = int(mask.sum())
+    if m == 0:
         return out
-    pm = p[mask]
-    n = len(pm)
-    order = np.argsort(pm)
-    ranked = pm[order]
-    adj = ranked * n / np.arange(1, n + 1)
-    adj = np.minimum.accumulate(adj[::-1])[::-1]
-    adj = np.clip(adj, 0, 1)
-    restored = np.empty_like(adj)
-    restored[order] = adj
-    out[mask] = restored
+    out[mask] = np.clip(p[mask] * m, 0, 1)
     return out
 
 
@@ -115,17 +109,17 @@ def main():
             rows.append(row)
 
     out_df = pd.DataFrame(rows)
-    out_df["p_adj_BH"] = np.nan
+    out_df["p_adj_bonferroni"] = np.nan
     for metric in METRICS:
         mask = out_df["metric"] == metric
-        out_df.loc[mask, "p_adj_BH"] = bh_adjust(
+        out_df.loc[mask, "p_adj_bonferroni"] = bonferroni_adjust(
             out_df.loc[mask, "p_value"].to_numpy()
         )
 
     cols = ["group_A", "group_B", "metric",
             "n_A", "n_B",
             "mean_A", "mean_B", "median_A", "median_B",
-            "stat", "p_value", "p_adj_BH", "cohens_d"]
+            "stat", "p_value", "p_adj_bonferroni", "cohens_d"]
     out_df = out_df[cols]
 
     out_path = Path(args.out)
