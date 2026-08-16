@@ -34,6 +34,46 @@ Upstream source paths (after Step 7) and the flat popFiles/ targets:
 
 The `freqs.${rg}.tab.gz` files **are** produced. Upstream's own `bcftools roh` run uses `--estimate-AF -` on the group-subset VCF (no external AF file needed in-pipeline), but GPA's downstream `bcftools roh` runs on a 1–2 animal mate-pair VCF that cannot estimate AF from its own samples — it requires an external tabix-indexed AF table via `--AF-file`. That's what `freqs.${rg}.tab.gz` + `.tbi` is for: downstream consumption, one per group, so each GPA report tab can call ROH on the candidate animal under the same AF prior that the tab's reference distribution was built with. GPA should **stop** building `freqs.tab.gz` locally in its `create_popFiles.sh` and instead copy the three upstream-produced per-group files.
 
+### 1.1 Secondary outputs (PCA artifacts)
+
+The nine files above are the per-group reference contract. The PLINK2 `--pca` outputs are a second family that GPA reads but that upstream does **not** promise as a fixed-shape interface — PC count, eigenvalue count, and the SNP-row count of `eigenvec.allele` all drift with the input data. They are documented here because the refactor renamed them, so every GPA-side read breaks; treat the *names* as a commitment and the *shapes* as the consumer's concern (see §5).
+
+The refactor inserted the same `.${rg}.` infix into the PCA outputs that previously carried bare whole-pop names. Source: `genDiversity_per_group.sh` §2 builds `pca_prefix="${OUTPUT_DIR}/divStats/filtered.LD_prune${rg_tag}.pca"` with `rg_tag=".${rg}"`.
+
+**Renamed (wholePop) — 9 files:**
+
+| pre-refactor (main) | per-group-references (current) |
+|---|---|
+| `divStats/filtered.LD_prune.pca.eigenval` | `divStats/filtered.LD_prune.wholePop.pca.eigenval` |
+| `divStats/filtered.LD_prune.pca.eigenvec` | `divStats/filtered.LD_prune.wholePop.pca.eigenvec` |
+| `divStats/filtered.LD_prune.pca.eigenvec.allele` | `divStats/filtered.LD_prune.wholePop.pca.eigenvec.allele` |
+| `divStats/filtered.LD_prune.pca.eigenvec.wBook_Size` | `divStats/filtered.LD_prune.wholePop.pca.eigenvec.wBook_Size` |
+| `divStats/filtered.LD_prune.pca.eigenvec.wCOI` | `divStats/filtered.LD_prune.wholePop.pca.eigenvec.wCOI` |
+| `divStats/filtered.LD_prune.pca.eigenvec.wGait` | `divStats/filtered.LD_prune.wholePop.pca.eigenvec.wGait` |
+| `divStats/filtered.LD_prune.pca.eigenvec.wSex` | `divStats/filtered.LD_prune.wholePop.pca.eigenvec.wSex` |
+| `divStats/filtered.LD_prune.pca.log` | `divStats/filtered.LD_prune.wholePop.pca.log` |
+| `divStats/filtered.LD_prune.pca.pca_pairwise_euclidean.dist` | `divStats/filtered.LD_prune.wholePop.pca.pca_pairwise_euclidean.dist` |
+
+**New per-group PCA artifacts — Trotter / Pacer.** The refactor also added per-gait PCA runs. Trotter and Pacer use plain `--pca` (no `'allele-wts'`), so they produce a strict subset of wholePop's PCA file family — no `eigenvec.allele`, no `eigenvec.wGait` (single-gait by construction), no `eigenvec.wSex` (the sex overlay is wholePop-only).
+
+```
+divStats/filtered.LD_prune.${rg}.pca.eigenval                 # rg ∈ {Trotter, Pacer}
+divStats/filtered.LD_prune.${rg}.pca.eigenvec
+divStats/filtered.LD_prune.${rg}.pca.eigenvec.wBook_Size
+divStats/filtered.LD_prune.${rg}.pca.eigenvec.wCOI
+divStats/filtered.LD_prune.${rg}.pca.log
+divStats/filtered.LD_prune.${rg}.pca.pca_pairwise_euclidean.dist
+```
+
+These reflect per-group population structure: Trotter PC1 is the strongest axis of variation *within Trotters*, not the Trotter-vs-Pacer axis that wholePop's PC1 captures.
+
+**Dropped — 2 files no longer produced:**
+
+| file | replacement |
+|---|---|
+| `divStats/filtered.LD_prune.pca.correlation_plot_PCA_EUCLIDEAN_DIST_vs_KINSHIP_PLINK.png` | `divStats/${rg}.relatedness_correlation.{correlation_heatmap,pairplot}.png` (per-group, `genDiversity_per_group.sh` §14). |
+| `divStats/filtered.LD_prune.pca.pca_pairwise_euclidean.dist.withKIN0` | The `.withKIN0` augmentation step is gone; §14's cross-method correlation reads `divStats/filtered.LD_prune.king_gait.${rg}.kin0.withIBS` and `…pca.pca_pairwise_euclidean.dist` separately and merges at consumption time. |
+
 ---
 
 ## 2. Schema invariants
@@ -106,6 +146,35 @@ GPA reads `Percent_of_Consensus_ROH` (= ROH_sh) at column 2.
 ### `sample_groups.tsv`
 Tab-separated. Header `IID  group`. `group ∈ {Trotter, Pacer, wholePop}`. Samples without a gait label are recorded as `group=wholePop` explicitly. wholePop membership is implicit for every sample regardless of the `group` column value.
 
+### PCA artifacts (§1.1 — secondary, not validator-enforced)
+
+The schemas below are described so GPA can read them by column index, but unlike the files above they are **not** guaranteed stable across runs: the PC count, the eigenvalue count, and the `eigenvec.allele` row count follow the input data. Header layout is stable; row/column counts are not.
+
+#### `filtered.LD_prune.${rg}.pca.eigenvec` (PLINK2 `--pca`)
+Tab-separated. Header starts with `#FID`. The pipeline does not override PLINK2's default of 10 PCs, so 12 columns total.
+```
+#FID   IID   PC1   PC2   PC3   PC4   PC5   PC6   PC7   PC8   PC9   PC10
+ 0     1      2     3     4     5     6     7     8     9    10    11
+```
+GPA reads PCs by the 0-based indices above (PC1 at 2 … PC10 at 11). Row count is `NGRP + 1`.
+
+#### `filtered.LD_prune.${rg}.pca.eigenval`
+No header, one eigenvalue per row, 10 rows by default. GPA reads the column-0 floats and divides by their sum to derive variance-explained percentages (`var_explained` in `pca_plots.R:29`). No row-count assertion — PLINK2's PC count is the only source of truth.
+
+#### `filtered.LD_prune.wholePop.pca.eigenvec.allele` (wholePop only — `--pca 'allele-wts'`)
+Tab-separated. One row per LD-pruned SNP plus header.
+```
+#CHROM   ID   REF   ALT   A1   PC1   ...   PC10
+ 0       1     2     3     4     5    ...   14
+```
+Trotter / Pacer do **not** produce this file — they use plain `--pca`.
+
+#### `filtered.LD_prune.${rg}.pca.eigenvec.{wBook_Size,wCOI}`
+Tab-separated. Identical to `eigenvec` plus one trailing column carrying the overlay attribute (`Book_Size` or `COI`), appended by inline `awk` in `genDiversity_per_group.sh` §2 / §5. Consumed only by R plot scripts, which re-derive the overlay column name from the header.
+
+#### `filtered.LD_prune.${rg}.pca.pca_pairwise_euclidean.dist`
+Tab-separated. Header `FID1 IID1 FID2 IID2 PCA_EUCLIDEAN_DIST DIST_KINSHIP`. Row count is `(NGRP × (NGRP − 1)) / 2 + 1`. Built inline in `genDiversity_per_group.sh` §11.
+
 ---
 
 ## 3. Numerical equivalence vs genuine change
@@ -162,12 +231,13 @@ Mechanical steps. Run through in order:
    cp "${OUTPUT_DIR}/preprocess/sample_groups.tsv"                                                 popFiles/.
    ```
 3. **Remove any reads of the old bare names** (`filtered.LD_prune.het_stats.het`, `roh_summary_by_RG_L3_Froh.txt`, `Inbreeding_Comparison.csv`, `Pairwise_Differences.csv`, `pruned.freq_stats.afreq`). `git grep` for each bare name to confirm no leftover references in GPA's R scripts or `generate_report.py`.
-4. **Delete the in-repo `freqs.tab.gz` self-build** in `create_popFiles.sh` — specifically the `bcftools +fill-tags $popVCF | bcftools query … > popFiles/freqs.tab.gz` block and the follow-up `tabix`. That file is now shipped per-group by upstream (step 2 above).
-5. **Teach `GPA.sh` to pick the right `--AF-file` per report tab.** At present it runs `bcftools roh -G30 --AF-file $allele_freqs $vcf_filtered` exactly once with a single whole-pop AF file, then the three tabs all read from the same outputs. For the per-group refactor to do real work, GPA needs to loop `bcftools roh` three times — once per `rg` — each with `--AF-file popFiles/freqs.${rg}.tab.gz`, producing per-group `roh_out.${rg}.txt` → L1/L2/L3 → `roh_summary_by_RG_L3_Froh.${rg}.txt` → F_ROH on the candidate, and pipe each into the matching tab's histogram. This is the only non-mechanical GPA change in this migration.
-6. **Add a validator call** at the end of `create_popFiles.sh` (see §5 below).
-7. **Update the report generator** (`generate_report.py` and the `plot_*.R` set in `../GPA/`) to read `${rg}.` suffixed filenames for all three tabs. Column indices unchanged; only filenames change.
-8. **Regenerate test fixtures** if GPA has recorded-output tests pinned to the old bare-named files.
-9. **Before merge:** run a full GPA report end-to-end on a populated `popFiles/` dir and confirm each tab (wholePop, Trotter, Pacer) renders with a distinct distribution for F_SNP, F_ROH, D_SNP, G_SNP, D_ROH, G_ROH, and ROH_sh. (The wholePop tab should look like today's single report; the other two should be new.) Expected direction for F_ROH on the candidate animal: on the Trotter tab its F_ROH should shift relative to the legacy whole-pop calibration, and the shift's sign should match the Fst landscape between Trotter and wholePop at the variants in that animal's ROH segments.
+4. **Update the PCA-artifact reads** (§1.1). `git grep` the GPA repo for the bare names — `filtered.LD_prune.pca.eigenvec`, `.eigenval`, `.eigenvec.allele`, `.eigenvec.w{Sex,Gait,Book_Size,COI}`, `.pca_pairwise_euclidean.dist` — and swap each to the `wholePop`-infix version, or to the `.${rg}.` variant where the read is per-tab. If `create_popFiles.sh` copies any of these into `popFiles/`, append the new names to the copy block; the likeliest candidates are `eigenvec.allele` (PC-loading-by-SNP plots) and `eigenvec` (population-structure tabs). If GPA reads either of the two dropped files, switch to the replacement listed in §1.1.
+5. **Delete the in-repo `freqs.tab.gz` self-build** in `create_popFiles.sh` — specifically the `bcftools +fill-tags $popVCF | bcftools query … > popFiles/freqs.tab.gz` block and the follow-up `tabix`. That file is now shipped per-group by upstream (step 2 above).
+6. **Teach `GPA.sh` to pick the right `--AF-file` per report tab.** At present it runs `bcftools roh -G30 --AF-file $allele_freqs $vcf_filtered` exactly once with a single whole-pop AF file, then the three tabs all read from the same outputs. For the per-group refactor to do real work, GPA needs to loop `bcftools roh` three times — once per `rg` — each with `--AF-file popFiles/freqs.${rg}.tab.gz`, producing per-group `roh_out.${rg}.txt` → L1/L2/L3 → `roh_summary_by_RG_L3_Froh.${rg}.txt` → F_ROH on the candidate, and pipe each into the matching tab's histogram. This is the only non-mechanical GPA change in this migration.
+7. **Add a validator call** at the end of `create_popFiles.sh` (see §5 below).
+8. **Update the report generator** (`generate_report.py` and the `plot_*.R` set in `../GPA/`) to read `${rg}.` suffixed filenames for all three tabs. Column indices unchanged; only filenames change.
+9. **Regenerate test fixtures** if GPA has recorded-output tests pinned to the old bare-named files.
+10. **Before merge:** run a full GPA report end-to-end on a populated `popFiles/` dir and confirm each tab (wholePop, Trotter, Pacer) renders with a distinct distribution for F_SNP, F_ROH, D_SNP, G_SNP, D_ROH, G_ROH, and ROH_sh. (The wholePop tab should look like today's single report; the other two should be new.) Expected direction for F_ROH on the candidate animal: on the Trotter tab its F_ROH should shift relative to the legacy whole-pop calibration, and the shift's sign should match the Fst landscape between Trotter and wholePop at the variants in that animal's ROH segments.
 
 ---
 
@@ -202,6 +272,8 @@ where `$gpa_root` is the parent directory containing `popFiles/` (typically the 
 **Row-count formulas** use `NGRP` as the group size (looked up from `samples.${rg}.txt` if present, else `0`). Use `NGRP+1` for one-row-per-sample files, `(NGRP*(NGRP-1))/2+1` for pairwise files, and the literal string `any` to skip the row-count check.
 
 **Header regexes** are extended-regex (fed to `grep -E`). Keep them anchored (`^...$`) wherever possible; a passing match on a header is evidence the schema hasn't silently drifted. If upstream genuinely changes a header, update the script in both repos in the same PR pair — the script is literally the schema contract.
+
+**Scope — the PCA artifacts are deliberately out.** The `FILE_SPECS` array covers the nine per-group reference files of §1 and nothing else. The PCA family documented in §1.1 / §2 is *not* validated, by design: those are secondary artifacts that GPA happens to read but that upstream does not promise as a fixed-shape interface — PC count, eigenvalue count, and the `eigenvec.allele` SNP-row count all move with the input data, so a row-count assertion would fail on ordinary reruns. Header and row checks for the PCA family stay the consumer's concern in `../GPA/`. If a future change makes a PCA file's schema part of the contract, add it to `FILE_SPECS` at that point.
 
 ---
 
