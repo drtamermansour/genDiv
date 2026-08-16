@@ -56,7 +56,7 @@ The pipeline is split across five bash files at the repo root:
 | `genDiversity_common.sh` | CONFIG, helpers (`log`, `run_python`, `run_r`, `upload`), `ERR` trap, log redirection (guarded by `GENDIV_LOG_SETUP` so subscripts don't double-log) | sourced |
 | `genDiversity_shared.sh` | Whole-pop preprocessing (Sections 1–3) + effective-genome-length + autosomes.genome + `samples.{wholePop,Trotter,Pacer}.txt` + `sample_groups.tsv` | `bash genDiversity_shared.sh` |
 | `genDiversity_per_group.sh` | Per-group metric stage; takes `$rg ∈ {wholePop, Trotter, Pacer}`, runs 3× | `bash genDiversity_per_group.sh <rg>` |
-| `genDiversity_aggregate.sh` | Cross-group: `fst_stats.R` over all five FST summaries, twoGait / threeBooksize ROH_sh concatenations, Froh-vs-ROHsh plots | `bash genDiversity_aggregate.sh` |
+| `genDiversity_aggregate.sh` | Cross-group, five jobs: `fst_stats.R` over all five FST summaries; twoGait / threeBooksize ROH_sh concatenations + Froh-vs-ROHsh plots; ROH_common cross-group figures + pairwise stats; ROH islands + gene annotation; the LD-decay *N_e* tool loop | `bash genDiversity_aggregate.sh` |
 
 All scripts respect `OUTPUT_DIR` as an env override, so re-running into an existing folder (e.g., to refresh just one group) works the same way as a fresh timestamped run.
 
@@ -69,8 +69,9 @@ Conceptual workflow phases:
 3. **Final Filtering** (`shared.sh`) — apply missingness/MAF/HWE thresholds to produce the clean dataset; LD pruning.
 4. **Whole-pop preprocessing tail** (`shared.sh`) — derives `effective_autosomal_genome_length.txt`, `autosomes.genome`, and per-group sample lists (`samples.${rg}.txt` + `sample_groups.tsv`) so `per_group.sh` can run.
 5. **Per-group reference files** (`per_group.sh`, 3×) — sections mirroring the original pipeline order. Highlights: per-group afreq, PCA + overlays (wSex / wGait wholePop-only, wBook_Size / wCOI all groups), A_e and whole-pop FST (wholePop-only), FST book-size-within-gait, per-group F_SNP `.het`, per-group bcftools roh + L1/L2/L3 + consensus ROH (nested over book-size for Trotter/Pacer), per-group tabix `freqs.${rg}.tab.gz` emitted alongside the ROH call for downstream GPA `bcftools roh --AF-file` consumption, F_ROH summary, per-group GRM + ROHRM + analysis_comparison across all `$ROH_CUTOFFS`, per-group KING + IBS + `related.${rg}`, PCA pairwise Euclidean, cross-method correlation plot, and COI-vs-F_ROH / F_ROH-vs-D_ROH / F_SNP-vs-D_ROH / F_SNP-vs-F_ROH doubleAnn plots.
-6. **Cross-group aggregation** (`aggregate.sh`) — `fst_stats.R` over the five FST summaries, twoGait and threeBooksize per-sample ROH_sh concatenations, Froh-vs-ROHsh plots iterating wholePop / twoGait / threeBooksize.
-7. **Upload** — `rclone` is invoked throughout each subscript; there's no single upload phase.
+6. **Cross-group aggregation** (`aggregate.sh`) — `fst_stats.R` over the five FST summaries, twoGait and threeBooksize per-sample ROH_sh concatenations, Froh-vs-ROHsh plots iterating wholePop / twoGait / threeBooksize, ROH_common cross-group figures + pairwise subgroup stats, and ROH islands with gene annotation.
+7. **Effective population size** (`aggregate.sh`) — the opt-out `scripts/ne/` loop runs each installed LD-decay *N_e* tool (GONE2, currentNe2, NeEstimator, SNeP) once per group into `divStats/ne/`. See "LD-decay effective population size" below; this is a full analysis stage, not a sub-step of phase 6.
+8. **Upload** — `rclone` is invoked throughout each subscript; there's no single upload phase.
 
 ### Python Scripts (`scripts/`)
 
@@ -197,6 +198,11 @@ genDiversity_aggregate.sh  (runs once)
                  consolidation; gene annotation against Ensembl EquCab3
                  GTF + curated horse-selection candidate-gene list →
                  divStats/roh_islands/
+  → N_e: for tool in gone2 currentne2 neestimator snep, run
+         scripts/ne/run_<tool>.sh if executable, once per group →
+         divStats/ne/<tool>/Ne_<tool>_summary.csv (+ per-group raw
+         outputs). Skipped silently for any tool whose wrapper is
+         absent or non-executable.
   ↓
 Google Drive (rclone upload — interleaved, not a dedicated phase)
 ```

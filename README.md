@@ -62,6 +62,31 @@ for rg in wholePop Trotter Pacer; do bash ./genDiversity_per_group.sh "$rg"; don
 bash ./genDiversity_aggregate.sh
 ```
 
+## What a run produces
+
+Everything lands in one self-contained `results_<timestamp>/` directory — downloaded inputs and all outputs together, so a run is reproducible and disposable as a unit. Plan for **a few GB of disk and an overnight wall clock**: the reference run `results_20260421_200003` is 2.4 GB and was started in the evening and collected the next morning. It runs 10-way parallel by default (`nthreads` in `genDiversity_common.sh`).
+
+| Subdirectory | Size (reference run) | Contents |
+|---|---:|---|
+| `divStats/` | 1.3 GB | The deliverables: ROH calls and consensus regions, heterozygosity / F_ROH / F_SNP references, PCA, KING and IBS relatedness, FST, ROH_common, ROH islands, and `ne/` effective-population-size trajectories |
+| `rep_ROHRM/` | 48 MB | ROH-based relationship matrices and GRM-vs-ROHRM comparisons, per group and per ROH cutoff |
+| `LD_pruned/`, `filtered/`, `preprocess/`, `dedup/`, `inspect/` | ~310 MB | QC and filtering intermediates, kept so any number can be traced back to the genotypes it came from |
+| `SNPdata_iScan_Standardbred/` | 713 MB | The rclone-downloaded raw input |
+| `run.log` | — | Full stdout+stderr of every invocation into this directory |
+
+Outputs are also rclone-uploaded to Google Drive as they are produced, so results survive the compute node.
+
+The nine per-group reference files that the downstream GPA report pipeline consumes are specified in [`MIGRATION.md`](./MIGRATION.md) — that document, not this one, is the contract.
+
+## Exploratory analyses
+
+`explore.sh` runs one-off analyses against a finished run. It is not part of the pipeline and never runs automatically:
+
+```bash
+OUTPUT_DIR=results_<timestamp> bash explore.sh              # all tasks
+OUTPUT_DIR=results_<timestamp> bash explore.sh <task_name>  # one task
+```
+
 ## Validating outputs
 
 After the pipeline finishes, check that every expected per-group reference file is present with the right header and row count:
