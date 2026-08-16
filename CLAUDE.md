@@ -7,7 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is a genomic diversity assessment pipeline for Standardbred horses (~500+ individuals). It analyzes SNP genotyping data to compute genetic diversity metrics (ROH, heterozygosity, relatedness, PCA) and generate population-level reference ranges for breeding programs.
 
 See also:
-- `README.md` — human-oriented setup recipe (conda/mamba environment).
+- `README.md` — human-oriented setup and orientation: what a run produces, disk/runtime cost, how to run one stage.
+- `environment.yml` — single source of truth for the conda environment; `scripts/check_env.py` proves it still covers the code.
 - `MIGRATION.md` — the filename / schema contract between this pipeline and the downstream GPA report pipeline (`../GPA/`). Update it whenever a producer here or a consumer there changes.
 - `scripts/validate_popRefs.sh` — dual-mode validator for the per-group reference files; runs at the end of this pipeline and at the end of GPA's `create_popFiles.sh` (both sides are wired up). The GPA copy has diverged by adding a `POPFILES_INVARIANT_SPECS` array — see `MIGRATION.md` §5 before porting changes across.
 - `scripts/benchmark/run_benchmark.sh` — builds a 25-Trotter + 25-Pacer subset from an existing full-run `OUTPUT_DIR` and runs `per_group.sh × 3 + aggregate.sh` end-to-end for fast regression testing.
@@ -33,16 +34,29 @@ bash ./genDiversity_aggregate.sh              # cross-group summaries + plots
 
 ## Environment Setup
 
-Uses conda/mamba with a named environment `genDiv`. Full setup command lives in `README.md`; below is a summary focused on what the pipeline actually invokes at runtime.
+**`environment.yml` is the single source of truth.** Do not maintain a second dependency list here or in `README.md` — point at that file instead. It declares only direct dependencies (something a script invokes or imports), each annotated with its consumer, and leaves transitives to the solver.
 
-**Runtime dependencies actually invoked:**
-- CLI tools: `plink`, `plink2`, `bcftools`, `bedtools`, `beagle`, `rclone`
-- Python: `numpy`, `pandas`, `scipy`, `matplotlib`, `seaborn`, `allel` (scikit-allel, `ROHRM_Creator.py`), `tqdm` (`ROHRM_Creator.py`), `openpyxl` (the `read_excel` step in `genDiversity_shared.sh`)
-- R: `ggplot2`, `gridExtra`, `viridis`, `reshape2`, `GGally`, `effsize`, `dplyr` (`fst_stats.R`, `plot_Ae.R`), `tidyr` (`plot_Ae.R`)
+```bash
+mamba env create -f environment.yml && conda activate genDiv
+```
 
-**In the env recipe but not currently invoked by the pipeline:** `gcta`, `snakemake`.
+Two invariants worth knowing before you touch dependencies:
 
-To re-derive these lists after adding a script: `grep -rhoE '^(import|from) [a-zA-Z0-9_]+' scripts/*.py scripts/ne/*.py explore/*.py` for Python, and `grep -rhoE '(library|require)\([a-zA-Z0-9._]+' scripts/*.R` for R.
+- **`rclone` is deliberately not declared.** It comes from the cluster module system (`module load rclone` at `genDiversity_shared.sh:12` and `explore.sh:25`), not conda. `scripts/check_env.py` knows this via its `EXTERNALLY_PROVIDED` set.
+- **Never regenerate `environment.yml` with `conda env export`.** It would record one machine's transitive closure and destroy the direct/transitive distinction the file exists to preserve.
+
+**After adding or changing any script, run the drift check:**
+
+```bash
+python3 scripts/check_env.py            # exits 1 on any undeclared dependency
+python3 scripts/check_env.py --strict   # also fails on declared-but-unused
+```
+
+This is not optional politeness — the failure it catches is silent. A package can be missing from the spec while the pipeline still runs, because something else pulled it in transitively; nothing breaks until the environment is built from scratch. That is exactly how `r-dplyr`, `r-tidyr`, and `tqdm` stayed undeclared for months.
+
+If you add a dependency whose import name differs from its conda package name (e.g. `allel` → `scikit-allel`), add the mapping to `PACKAGE_ALIASES` in `scripts/check_env.py`, or the check will report a false positive.
+
+`gcta` and `snakemake` are commented out in `environment.yml` — installed historically, invoked by nothing today.
 
 ## Architecture
 

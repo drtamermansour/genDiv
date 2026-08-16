@@ -1,0 +1,63 @@
+# Single source of truth for the genDiv runtime environment.
+#
+#   mamba env create -f environment.yml     # first time
+#   mamba env update -f environment.yml     # after editing this file
+#   conda activate genDiv
+#
+# Every entry below is a DIRECT dependency: something a pipeline script
+# invokes by name or a script imports. Transitive dependencies are left to
+# the solver on purpose.
+#
+# Do not regenerate this file with `conda env export`. That records the
+# solved transitive closure of one machine, which hides the distinction
+# between "we need this" and "something else pulled it in" — the exact
+# failure this file exists to prevent. Edit it by hand and let
+# `scripts/check_env.py` prove it still covers the code.
+#
+# NOT declared here, on purpose:
+#   rclone — supplied by the cluster module system, not conda.
+#            `genDiversity_shared.sh:12` and `explore.sh:25` run
+#            `module load rclone` (1.65.1). Installing a second copy into
+#            the env would shadow the site-configured one and its remotes.
+
+name: genDiv
+
+channels:
+  - conda-forge
+  - bioconda
+
+dependencies:
+  # ---- Genomics CLI tools -------------------------------------------------
+  - plink=1.90b7.7            # PLINK 1.9: legacy .bed/.bim/.fam work, ROH
+  - plink2=2.0.0a.6.9         # PCA, --freq, --het, --make-rel, KING, FST
+  - bcftools=1.22             # roh, +fill-tags, query, norm
+  - htslib=1.22.1             # tabix / bgzip, invoked directly (per_group §6)
+  - bedtools=2.31.1           # interval arithmetic for ROH_common + islands
+  - beagle=5.5_27Feb25.75f    # phasing; required before ROHRM_Creator.py
+
+  # ---- R ------------------------------------------------------------------
+  - r-base=4.5.2
+  - r-ggplot2=4.0.1           # every plotting script
+  - r-gridextra=2.3           # pca_plots.R
+  - r-viridis=0.6.5           # pca_plots.R
+  - r-reshape2=1.4.5          # correlation_plot.R
+  - r-ggally=2.4.0            # correlation_plot.R
+  - r-effsize=0.8.1           # effAllele_stats.R
+  - r-dplyr=1.1.4             # fst_stats.R, plot_Ae.R
+  - r-tidyr=1.3.2             # plot_Ae.R
+
+  # ---- Python -------------------------------------------------------------
+  - python=3.13
+  - numpy=2.3.5
+  - pandas=2.3.3
+  - scipy=1.17.0              # roh_common_pairwise_stats.py (mannwhitneyu)
+  - matplotlib-base=3.10.8    # -base: plots are written to file, no GUI backend
+  - seaborn=0.13.2
+  - scikit-allel=1.3.13       # ROHRM_Creator.py (`import allel`)
+  - tqdm=4.67.1               # ROHRM_Creator.py progress bar
+  - openpyxl=3.1.5            # pd.read_excel in genDiversity_shared.sh
+
+  # ---- Optional: installed historically, invoked by nothing today ---------
+  # Re-add if you wire them in; `scripts/check_env.py` will not ask for them.
+  # - gcta=1.94.1
+  # - snakemake=9.16.3

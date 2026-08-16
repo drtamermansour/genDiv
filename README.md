@@ -4,41 +4,26 @@ This pipeline makes use of 500+ horses' genotyping data to assess genetic divers
 
 ## Environment
 
-Create a named conda/mamba environment (`genDiv`) containing every tool and package the pipeline invokes at runtime:
+[`environment.yml`](./environment.yml) is the single source of truth for the runtime environment. Build from it:
 
 ```bash
-## (optional) update conda itself
-conda update conda
-
-## create the env
-mamba create -n genDiv \
-  conda-forge::r-base=4.5.2 \
-  conda-forge::r-ggplot2=4.0.1 \
-  conda-forge::r-gridextra=2.3 \
-  conda-forge::r-viridis=0.6.5 \
-  conda-forge::r-reshape2=1.4.5 \
-  conda-forge::r-ggally=2.4.0 \
-  conda-forge::r-effsize=0.8.1 \
-  conda-forge::r-dplyr=1.1.4 \
-  conda-forge::r-tidyr=1.3.2 \
-  conda-forge::openpyxl \
-  conda-forge::scikit-allel \
-  conda-forge::tqdm \
-  conda-forge::numpy conda-forge::pandas conda-forge::scipy \
-  conda-forge::matplotlib conda-forge::seaborn \
-  bioconda::plink bioconda::plink2 bioconda::bcftools bioconda::bedtools \
-  bioconda::beagle bioconda::rclone
-
-## Optional / not currently invoked by genDiversity.sh — keep if you plan to wire them in:
-##   bioconda::gcta bioconda::snakemake=9.16.3
-##
-## Every package above IS invoked: r-dplyr by fst_stats.R, r-tidyr by plot_Ae.R,
-## tqdm and scikit-allel by ROHRM_Creator.py, openpyxl by the read_excel step in
-## genDiversity_shared.sh. They resolve as transitive dependencies too, so a stale
-## env can mask a missing pin — build from this list, not from `conda env export`.
-
+mamba env create -f environment.yml   # first time
+mamba env update -f environment.yml   # after environment.yml changes
 conda activate genDiv
 ```
+
+Two things that file will not do for you:
+
+- **`rclone` is not in it.** The pipeline runs `module load rclone` (`genDiversity_shared.sh:12`), so rclone comes from the cluster module system with its remotes already configured. Installing a conda copy would shadow it. You need a working `remote_UCDavis_GoogleDr` remote before the first run.
+- **Do not regenerate it with `conda env export`.** That records one machine's solved transitive closure and erases the distinction between "we need this" and "something else pulled it in" — which is how `r-dplyr`, `r-tidyr`, and `tqdm` once went undeclared while the pipeline kept working locally. Edit `environment.yml` by hand.
+
+To confirm the spec still covers the code after adding or changing a script:
+
+```bash
+python3 scripts/check_env.py     # exits non-zero on any undeclared dependency
+```
+
+It scans every `.py`, `.R`, and `.sh` in the repo for imports, `library()` calls, and CLI invocations, maps each to its conda package name, and fails on anything `environment.yml` does not declare. It needs only a bare `python3`, so it runs without the environment activated.
 
 ## Running
 
