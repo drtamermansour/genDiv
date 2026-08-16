@@ -2,9 +2,12 @@
 
 Reads the PLINK2 --make-rel 'square' output (.rel + .rel.id) from the
 wholePop run and the USTA_Diversity_Study.gait_bookSize factor file, and
-writes a 9-row mean +/- SD table of within-subgroup pairwise GRM values
-(off-diagonal only): wholePop + Pacer + Pacer_{LOW,MEDIUM,HIGH} +
-Trotter + Trotter_{LOW,MEDIUM,HIGH}.
+writes a 9-row table of within-subgroup pairwise GRM values (off-diagonal
+only): wholePop + Pacer + Pacer_{LOW,MEDIUM,HIGH} + Trotter +
+Trotter_{LOW,MEDIUM,HIGH}. Each row carries the mean +/- SD and the
+percent of pairs above --tail-threshold (default 0.20), the latter
+summarising the upper tail in a way that does not depend on how many
+pairs the stratum contributes.
 
 The pairwise GRM values are the same VanRaden additive-genetic
 similarities that PLINK2's --pca uses internally, so this summary
@@ -58,6 +61,19 @@ def fmt_mean_sd(values, decimals=4):
             f"{np.std(values, ddof=1):.{decimals}f}")
 
 
+def pct_above(values, threshold, decimals=2):
+    """Percent of pairs exceeding `threshold`.
+
+    Reported alongside the mean because the popular-sire signal is carried
+    by the upper tail: the per-stratum maximum is sample-size dependent
+    (a stratum with 4x more pairs gets 4x more chances at an extreme),
+    whereas this frequency is not.
+    """
+    if len(values) == 0:
+        return "NA"
+    return f"{100.0 * np.mean(values > threshold):.{decimals}f}"
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--rel", required=True,
@@ -71,7 +87,12 @@ def main():
                     help="Output CSV path (subgroup-level summary).")
     ap.add_argument("--out-plot", required=True,
                     help="Output PNG (violin plot of within-subgroup distributions).")
+    ap.add_argument("--tail-threshold", type=float, default=0.20,
+                    help="GRM kinship above which a pair counts toward the "
+                         "upper-tail frequency column (default: 0.20, the "
+                         "KING first-degree cutoff applied at QC).")
     args = ap.parse_args()
+    tail_col = f"Pct_pairs_gt_{args.tail_threshold:.2f}"
 
     # Sample IDs in matrix row/column order. PLINK2 writes a "#FID IID"
     # comment header line; treat any leading "#" line as a comment.
@@ -117,6 +138,7 @@ def main():
         "N_animals": n_animals["wholePop"],
         "N_pairs": int(len(pair_values)),
         "Mean_GRM_kinship": fmt_mean_sd(pair_values),
+        tail_col: pct_above(pair_values, args.tail_threshold),
     }]
     for gait in ("Pacer", "Trotter"):
         gait_i = np.array([s.startswith(gait + "_") for s in pair_si])
@@ -127,6 +149,7 @@ def main():
             "N_animals": n_animals[gait],
             "N_pairs": int(gait_mask.sum()),
             "Mean_GRM_kinship": fmt_mean_sd(pair_values[gait_mask]),
+            tail_col: pct_above(pair_values[gait_mask], args.tail_threshold),
         })
         for bs in BOOK_SIZE_ORDER:
             label = f"{gait}_{bs}"
@@ -136,6 +159,7 @@ def main():
                 "N_animals": n_animals[label],
                 "N_pairs": int(sub_mask.sum()),
                 "Mean_GRM_kinship": fmt_mean_sd(pair_values[sub_mask]),
+                tail_col: pct_above(pair_values[sub_mask], args.tail_threshold),
             })
 
     df = (pd.DataFrame(rows)
