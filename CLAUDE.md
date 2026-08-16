@@ -9,7 +9,7 @@ This is a genomic diversity assessment pipeline for Standardbred horses (~500+ i
 See also:
 - `README.md` — human-oriented setup recipe (conda/mamba environment).
 - `MIGRATION.md` — the filename / schema contract between this pipeline and the downstream GPA report pipeline (`../GPA/`). Update it whenever a producer here or a consumer there changes.
-- `scripts/validate_popRefs.sh` — dual-mode validator for the per-group reference files; runs at end of the pipeline (and at end of GPA's `create_popFiles.sh` once the GPA-side PR lands).
+- `scripts/validate_popRefs.sh` — dual-mode validator for the per-group reference files; runs at the end of this pipeline and at the end of GPA's `create_popFiles.sh` (both sides are wired up). The GPA copy has diverged by adding a `POPFILES_INVARIANT_SPECS` array — see `MIGRATION.md` §5 before porting changes across.
 - `scripts/benchmark/run_benchmark.sh` — builds a 25-Trotter + 25-Pacer subset from an existing full-run `OUTPUT_DIR` and runs `per_group.sh × 3 + aggregate.sh` end-to-end for fast regression testing.
 
 ## Running the Pipeline
@@ -35,11 +35,14 @@ bash ./genDiversity_aggregate.sh              # cross-group summaries + plots
 
 Uses conda/mamba with a named environment `genDiv`. Full setup command lives in `README.md`; below is a summary focused on what the pipeline actually invokes at runtime.
 
-**Runtime dependencies called by `genDiversity.sh`:**
-- CLI tools: `plink`, `plink2`, `bcftools`, `beagle`, `rclone`
-- Interpreters: `python` (with `numpy`, `pandas`, `scipy`, `matplotlib`, `seaborn`), `Rscript` (with `ggplot2`, `gridExtra`, `viridis`, `reshape2`, `GGally`, `effsize`)
+**Runtime dependencies actually invoked:**
+- CLI tools: `plink`, `plink2`, `bcftools`, `bedtools`, `beagle`, `rclone`
+- Python: `numpy`, `pandas`, `scipy`, `matplotlib`, `seaborn`, `allel` (scikit-allel, `ROHRM_Creator.py`), `tqdm` (`ROHRM_Creator.py`), `openpyxl` (the `read_excel` step in `genDiversity_shared.sh`)
+- R: `ggplot2`, `gridExtra`, `viridis`, `reshape2`, `GGally`, `effsize`, `dplyr` (`fst_stats.R`, `plot_Ae.R`), `tidyr` (`plot_Ae.R`)
 
-**In the env recipe but not currently invoked by the pipeline:** `gcta`, `bedtools`, `snakemake`.
+**In the env recipe but not currently invoked by the pipeline:** `gcta`, `snakemake`.
+
+To re-derive these lists after adding a script: `grep -rhoE '^(import|from) [a-zA-Z0-9_]+' scripts/*.py scripts/ne/*.py explore/*.py` for Python, and `grep -rhoE '(library|require)\([a-zA-Z0-9._]+' scripts/*.R` for R.
 
 ## Architecture
 
@@ -112,7 +115,7 @@ All Python scripts use `argparse`; run with `--help` to see usage.
 
 ### R Scripts (`scripts/`)
 
-Grouped by role. Each script's `genDiversity.sh` call site in parentheses.
+Grouped by role. All take positional arguments via `commandArgs(trailingOnly = TRUE)`; grep the owning stage (`genDiversity_per_group.sh` / `genDiversity_aggregate.sh`) for a real call site.
 
 **PCA:**
 
@@ -136,7 +139,7 @@ Grouped by role. Each script's `genDiversity.sh` call site in parentheses.
 | `plot_correlation.R` | Scatter of two columns with single-column color |
 | `plot_correlation_withColorsAndShapes.R` | Scatter with both color and shape mappings |
 
-**Statistics / plotting scripts** (hard-coded input paths rooted at `results_<timestamp>/`, no CLI args):
+**Statistics / plotting scripts** (take the run directory as their first positional argument, then resolve their inputs beneath it):
 
 | Script | Purpose |
 |--------|---------|
@@ -177,6 +180,8 @@ genDiversity_per_group.sh  (runs 3× — wholePop, Trotter, Pacer)
       divStats/PC_outlier_kinship.csv
   §10 per-group KING + IBS + related.${rg} (per-group --make-king-table)
   §11 PCA pairwise Euclidean distance
+      (§12 and §13 do not exist — numbering is inherited from the
+       pre-refactor script and was left alone to keep §14/§15 stable)
   §14 cross-method correlation plot (ROHRM vs KING vs PCA)
   §15 F_SNP / F_ROH / D_STD / D_ROH / ROH_sh correlation plots (--mode froh,
       --mode froh-cons, and four doubleAnn plots)
@@ -251,12 +256,15 @@ Every file follows the strict `<stem>.${rg}.<ext>` convention — wholePop outpu
 
 ## Key Parameters & Thresholds
 
-All tunable values are centralized in the CONFIG block at the top of `genDiversity.sh` (search for `# CONFIG`). Highlights:
+All tunable values are centralized in the CONFIG block at the top of **`genDiversity_common.sh`** (search for `# CONFIG`), which every subscript sources. Highlights:
 
+- **External paths** (edit these first on a new machine)
+  - `equCab3_map`, `ref`, `reference_fai` — sibling-repo inputs; see "Repository layout expectations"
+  - `GDRIVE_BASE` — rclone remote for both download and upload
 - **Genome & data**
   - Reference: EquCab3
-  - SNP array: Equine80select (~71,548 post-QC SNPs)
-  - Autosomal genome length used to normalize F_ROH
+  - SNP array: Equine80select v2.1 — 76,841 assayed → 71,548 after SNP deduplication (`genDiversity_shared.sh:177`) → ~58k after the missingness / MAF / HWE filters. Use the ~58k figure for anything downstream of Section 3; `MIGRATION.md` §3 records the exact per-run counts.
+  - Autosomal genome length used to normalize F_ROH — derived at runtime into `effective_autosomal_genome_length.txt`, not a CONFIG constant
 - **Reproducibility & parallelism**
   - `BEAGLE_SEED=12345` (phasing seed)
   - `nthreads=10`
@@ -283,12 +291,19 @@ All tunable values are centralized in the CONFIG block at the top of `genDiversi
 
 ## Running Individual Python Scripts
 
-Python scripts are called from within `genDiversity.sh` but can be run standalone:
+Every Python and R script can be run standalone against a finished `OUTPUT_DIR`:
 
 ```bash
 conda activate genDiv
-python scripts/ROHRM_Creator.py <args>
-python scripts/analysis_comparison.py <args>
+python scripts/ROHRM_Creator.py --help
+python scripts/analysis_comparison.py --help
 ```
 
-Check the corresponding section in `genDiversity.sh` for the exact arguments passed to each script.
+`genDiversity.sh` itself is a 26-line wrapper and calls no scripts directly. To find a real call site with its arguments, grep the stage that owns it:
+
+```bash
+grep -n "summary_grm_kinship" genDiversity_per_group.sh   # per-group stage
+grep -n "roh_common_pairwise_stats" genDiversity_aggregate.sh   # cross-group stage
+```
+
+All Python scripts use `argparse`, so `--help` is authoritative for the interface; the call site is what tells you which files the pipeline actually feeds in.
