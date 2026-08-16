@@ -3,6 +3,12 @@
 input_data/
 results_*/
 
+# Manuscript drafts and their reference PDFs. Local-only writing artifacts
+# (~23 MB, including third-party papers); this repo tracks the pipeline code,
+# not the papers written from its output.
+manuscript/
+genDiv_manuscript/
+
 # External tool checkouts (GONE2, future NeEstimator2 / SNeP).
 # Installed via scripts/ne/install_<tool>.sh; reproducible from those
 # scripts rather than from the working-tree blob.
