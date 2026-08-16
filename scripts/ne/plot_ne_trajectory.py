@@ -14,7 +14,6 @@ Annotations:
   * Shaded band for gen 1-4 — GONE block-based estimator returns these as
     a single identical value (Novo et al. 2023).
   * Standardbred-specific historical reference lines:
-      - 2011 (cap standardised to 140 mares/stallion both gaits)  -> gen 1.36
       - 2009 (USTA studbook cap introduced)                       -> gen 1.55
       - 1973 (closure of the Standardbred studbook)               -> gen 4.82
       - 1872 (breed founding, Hambletonian 10 era)                -> gen 14.0
@@ -54,12 +53,12 @@ METHOD_LINESTYLES = ["-", "--", ":", "-."]
 
 # Standardbred-specific historical reference events. Each entry is
 # (year, label, line-style-hint, vertical-anchor 0-1 for label y).
-# The 2009 USTA cap and the 2011 standardisation are 0.2 generations apart
-# and both sit inside the GONE artifact zone (gen 1.36 and gen 1.55 at
-# G=11.0); we collapse them into a single label drawn at the 2009 line.
+# Only the 2009 cap is marked: it is the intervention itself (140 mares
+# per Trotter stallion, 160 per Pacer stallion). The 2011 standardisation
+# to 140 for both gaits was a refinement of that cap, not a separate
+# event, and sat 0.2 generations away inside the same GONE artifact zone.
 SBRED_EVENTS = [
-    (2011, None,                                            "in_artifact",            0.55),
-    (2009, "USTA caps\n(2009 / 2011)",                      "in_artifact",            0.55),
+    (2009, "USTA studbook cap\n(2009)",                     "in_artifact",            0.55),
     (1973, "Studbook\nclosure\n(1973)",                     "interpretable_boundary", 0.80),
     (1872, "Breed founding\n~1872",                         "breed_founding",         0.30),
 ]
