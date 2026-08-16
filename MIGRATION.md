@@ -36,11 +36,15 @@ The `freqs.${rg}.tab.gz` files **are** produced. Upstream's own `bcftools roh` r
 
 ### 1.1 Secondary outputs (PCA artifacts)
 
-The nine files above are the per-group reference contract. The PLINK2 `--pca` outputs are a second family that GPA reads but that upstream does **not** promise as a fixed-shape interface — PC count, eigenvalue count, and the SNP-row count of `eigenvec.allele` all drift with the input data. They are documented here because the refactor renamed them, so every GPA-side read breaks; treat the *names* as a commitment and the *shapes* as the consumer's concern (see §5).
+The nine files above are the per-group reference contract. The PLINK2 `--pca` outputs are a second family that upstream produces but does **not** promise as a fixed-shape interface — PC count, eigenvalue count, and the SNP-row count of `eigenvec.allele` all drift with the input data. Treat the *names* as a commitment and the *shapes* as the consumer's concern (see §5).
+
+**GPA consumes exactly one of them: `eigenvec.allele`.** It is the PLINK2 `--score` weight file for the gait classifier's PCA projection, used on both sides of that classifier. `create_popFiles.sh` reads it from `divStats/filtered.LD_prune.wholePop.pca.eigenvec.allele` to project the reference cohort into `popFiles/filtered.LD_prune.projected.sscore` (which `gait_model.py` trains on to produce `popFiles/gait_model.pkl`), then copies it to the flat, rg-less `popFiles/eigenvec.allele`. `GPA.sh` and the `Snakefile` read that flat copy as `pca_allele_wt` to project the *candidate* into the same coordinate frame. The older path — training directly off `.eigenvec.wGait` — is commented out at `create_popFiles.sh:94`, so the overlay files are no longer on GPA's read path either. Nothing downstream reads `eigenvec`, `eigenval`, the `wBook_Size` / `wCOI` overlays, or `pca_pairwise_euclidean.dist`, and nothing reads the Trotter / Pacer PCA family at all.
+
+**Rename status: already applied downstream.** The GPA-side read was updated to the infixed name on GPA's own `per-group-references` branch (`create_popFiles.sh`, commit `bd14464`). The tables below are therefore a record of what moved, not an outstanding work item — see §4 step 4 for the verification that remains.
 
 The refactor inserted the same `.${rg}.` infix into the PCA outputs that previously carried bare whole-pop names. Source: `genDiversity_per_group.sh` §2 builds `pca_prefix="${OUTPUT_DIR}/divStats/filtered.LD_prune${rg_tag}.pca"` with `rg_tag=".${rg}"`.
 
-**Renamed (wholePop) — 9 files:**
+**Renamed (wholePop) — 9 files.** Only `eigenvec.allele` is consumed downstream; the other eight moved for naming-convention consistency.
 
 | pre-refactor (main) | per-group-references (current) |
 |---|---|
@@ -67,7 +71,7 @@ divStats/filtered.LD_prune.${rg}.pca.pca_pairwise_euclidean.dist
 
 These reflect per-group population structure: Trotter PC1 is the strongest axis of variation *within Trotters*, not the Trotter-vs-Pacer axis that wholePop's PC1 captures.
 
-**Dropped — 2 files no longer produced:**
+**Dropped — 2 files no longer produced.** Neither is read by GPA (verified by `git grep` over the GPA repo), so the replacements below are recorded for completeness rather than as a required migration.
 
 | file | replacement |
 |---|---|
@@ -148,7 +152,9 @@ Tab-separated. Header `IID  group`. `group ∈ {Trotter, Pacer, wholePop}`. Samp
 
 ### PCA artifacts (§1.1 — secondary, not validator-enforced)
 
-The schemas below are described so GPA can read them by column index, but unlike the files above they are **not** guaranteed stable across runs: the PC count, the eigenvalue count, and the `eigenvec.allele` row count follow the input data. Header layout is stable; row/column counts are not.
+The schemas below are described so a consumer can read them by column index, but unlike the files above they are **not** guaranteed stable across runs: the PC count, the eigenvalue count, and the `eigenvec.allele` row count follow the input data. Header layout is stable; row/column counts are not.
+
+Of these, only `eigenvec.allele` is on GPA's read path today (§1.1). The rest are documented because they are the files a future consumer is most likely to reach for, and because their shapes explain why the family is excluded from the validator (§5).
 
 #### `filtered.LD_prune.${rg}.pca.eigenvec` (PLINK2 `--pca`)
 Tab-separated. Header starts with `#FID`. The pipeline does not override PLINK2's default of 10 PCs, so 12 columns total.
@@ -231,7 +237,7 @@ Mechanical steps. Run through in order:
    cp "${OUTPUT_DIR}/preprocess/sample_groups.tsv"                                                 popFiles/.
    ```
 3. **Remove any reads of the old bare names** (`filtered.LD_prune.het_stats.het`, `roh_summary_by_RG_L3_Froh.txt`, `Inbreeding_Comparison.csv`, `Pairwise_Differences.csv`, `pruned.freq_stats.afreq`). `git grep` for each bare name to confirm no leftover references in GPA's R scripts or `generate_report.py`.
-4. **Update the PCA-artifact reads** (§1.1). `git grep` the GPA repo for the bare names — `filtered.LD_prune.pca.eigenvec`, `.eigenval`, `.eigenvec.allele`, `.eigenvec.w{Sex,Gait,Book_Size,COI}`, `.pca_pairwise_euclidean.dist` — and swap each to the `wholePop`-infix version, or to the `.${rg}.` variant where the read is per-tab. If `create_popFiles.sh` copies any of these into `popFiles/`, append the new names to the copy block; the likeliest candidates are `eigenvec.allele` (PC-loading-by-SNP plots) and `eigenvec` (population-structure tabs). If GPA reads either of the two dropped files, switch to the replacement listed in §1.1.
+4. **PCA-artifact reads (§1.1) — done; verify only.** `create_popFiles.sh` already reads the infixed `divStats/filtered.LD_prune.wholePop.pca.eigenvec.allele` and flattens it to `popFiles/eigenvec.allele`. Confirm no bare-name read crept back in — `git grep -n 'LD_prune\.pca\.'` over the GPA repo should return nothing — and leave the rest of the PCA family alone; GPA reads none of it.
 5. **Delete the in-repo `freqs.tab.gz` self-build** in `create_popFiles.sh` — specifically the `bcftools +fill-tags $popVCF | bcftools query … > popFiles/freqs.tab.gz` block and the follow-up `tabix`. That file is now shipped per-group by upstream (step 2 above).
 6. **Teach `GPA.sh` to pick the right `--AF-file` per report tab.** At present it runs `bcftools roh -G30 --AF-file $allele_freqs $vcf_filtered` exactly once with a single whole-pop AF file, then the three tabs all read from the same outputs. For the per-group refactor to do real work, GPA needs to loop `bcftools roh` three times — once per `rg` — each with `--AF-file popFiles/freqs.${rg}.tab.gz`, producing per-group `roh_out.${rg}.txt` → L1/L2/L3 → `roh_summary_by_RG_L3_Froh.${rg}.txt` → F_ROH on the candidate, and pipe each into the matching tab's histogram. This is the only non-mechanical GPA change in this migration.
 7. **Add a validator call** at the end of `create_popFiles.sh` (see §5 below).
@@ -273,7 +279,11 @@ where `$gpa_root` is the parent directory containing `popFiles/` (typically the 
 
 **Header regexes** are extended-regex (fed to `grep -E`). Keep them anchored (`^...$`) wherever possible; a passing match on a header is evidence the schema hasn't silently drifted. If upstream genuinely changes a header, update the script in both repos in the same PR pair — the script is literally the schema contract.
 
-**Scope — the PCA artifacts are deliberately out.** The `FILE_SPECS` array covers the nine per-group reference files of §1 and nothing else. The PCA family documented in §1.1 / §2 is *not* validated, by design: those are secondary artifacts that GPA happens to read but that upstream does not promise as a fixed-shape interface — PC count, eigenvalue count, and the `eigenvec.allele` SNP-row count all move with the input data, so a row-count assertion would fail on ordinary reruns. Header and row checks for the PCA family stay the consumer's concern in `../GPA/`. If a future change makes a PCA file's schema part of the contract, add it to `FILE_SPECS` at that point.
+**Scope — the PCA artifacts are deliberately out of the upstream validator.** Upstream's `FILE_SPECS` covers the nine per-group reference files of §1 and nothing else. The PCA family of §1.1 / §2 is *not* validated there, by design: PC count, eigenvalue count, and the `eigenvec.allele` SNP-row count all move with the input data, so a row-count assertion would fail on ordinary reruns.
+
+Existence checks for the one PCA file that matters are the consumer's concern, and the GPA copy already does this. Note that the GPA copy has **diverged from upstream by adding a second array**, `POPFILES_INVARIANT_SPECS` — 11 rows covering the rg-invariant bundle files that exist only in the flat `popFiles/` tree: `EquCab3_map`, the four SNP-list files, `pop.vcf.gz` (+ `.tbi`), `effective_autosomal_genome_length.txt`, `gait_model.pkl`, and the PCA row `pca_allele_wt|eigenvec.allele||any`. That array has no upstream counterpart — upstream never produces the flattened names — so when pulling a newer `validate_popRefs.sh` from this repo into GPA, port the `FILE_SPECS` changes and keep the local `POPFILES_INVARIANT_SPECS` block rather than overwriting the file wholesale.
+
+If a future change makes a PCA file's schema part of the contract, add it to upstream `FILE_SPECS` at that point.
 
 ---
 
