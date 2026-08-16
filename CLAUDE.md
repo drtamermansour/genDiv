@@ -80,16 +80,6 @@ Conceptual workflow phases:
 | `summary_grm_kinship.py` | Per-subgroup pairwise GRM kinship summary. Reads the wholePop PLINK2 `.rel` (square) + `.rel.id` and the `USTA_Diversity_Study.gait_bookSize` factor; writes a 9-row CSV of within-subgroup off-diagonal pairwise GRM values (wholePop + 2 gaits + 6 gait × book-size strata) plus a violin plot. Each row carries mean ± SD and `Pct_pairs_gt_0.20` — the percent of pairs above `--tail-threshold` (default 0.20, the KING first-degree QC cutoff). The tail frequency, not the per-stratum maximum, is the reportable upper-tail statistic: the maximum scales with the pair count, so the larger MEDIUM strata top out higher than HIGH despite HIGH carrying far denser tails. Uses the wholePop GRM (single common AF basis) so cross-gait subgroup comparison is on a single yardstick; the same VanRaden additive-genetic similarities feed PLINK2 `--pca`. |
 | `pc_outlier_kinship.py` | Confirms that PC2/PC3/PC4 "hidden familial structure" corresponds to genuine high-kinship clusters. For each PC, identifies the top-N (default 10) individuals at each tail (most positive and most negative loadings) and compares the within-cluster mean off-diagonal pairwise GRM kinship to the cohort mean (≈ 0 by GRM construction). Emits `divStats/PC_outlier_kinship.csv` with one row per (PC, tail). |
 | `roh_islands_annotate.py` | Identifies ROH islands per group from the per-window ROH frequency landscapes produced by `roh_common_landscape.py`, thresholds at the top-1% f_w (with absolute f_w ≥ 0.5 flagged as high-confidence), merges contiguous high-f_w windows allowing a small gap (≤ 2 windows by default), filters islands narrower than 500 kb, and annotates each island with overlapping Ensembl EquCab3 protein-coding genes. A curated horse-selection candidate-gene list (`scripts/horse_selection_candidates.tsv`) flags islands overlapping known selection loci (DMRT3, MSTN, LCORL/NCAPG, MC1R, KIT, ASIP, STX17, MITF, MEF2C, …). A cross-group consolidation pass `bedtools-merges` per-group island sets into unique regions and records which group(s) contributed. Emits `divStats/roh_islands/roh_islands.{wholePop,Trotter,Pacer}.csv` plus `divStats/roh_islands/roh_islands.consolidated.csv`. |
-
-### LD-decay effective population size (`scripts/ne/`)
-
-Each LD-decay-based *N_e* tool lives in its own wrapper under `scripts/ne/`. The convention is **modular and opt-out**: `genDiversity_aggregate.sh` iterates `gone2`, `neestimator`, `snep` and invokes any wrapper that exists and is executable. To remove a tool: delete (or `chmod -x`) its `run_*.sh` and `install_*.sh` files. No edits to `genDiversity_aggregate.sh` required.
-
-| Wrapper | Tool | Reference | Input | Output |
-|---|---|---|---|---|
-| `scripts/ne/run_gone2.sh` (+ `install_gone2.sh`) | **GONE2 v1.0.2** (Santiago, Köpke & Caballero 2025; doi:10.1038/s41467-025-61378-w) | per-generation *N_e* trajectory from a single SNP sample using the full LD spectrum | post-QC PLINK 1 `.bed/.bim/.fam` set, **not** LD-pruned (full LD spectrum required); MAF 0.05; constant rec rate 1.16 cM/Mb (Beeson et al. 2020) | `divStats/ne/gone2/<group>/<group>_GONE2_{Ne,STATS,d2}` + standardised `divStats/ne/gone2/Ne_gone2_summary.csv` (Group, Method, Generations_ago, Ne) |
-| `scripts/ne/run_neestimator.sh` (planned) | NeEstimator v2.1 (Do et al. 2014) | contemporary point *N_e* via LD method; method-matched to McGivney 2020 Thoroughbred *N_e* | LD-pruned PLINK set converted to GENEPOP via PGDSpider2 | `divStats/ne/neestimator/...` |
-| `scripts/ne/run_snep.sh` (planned) | SNeP v1.11 (Barbato et al. 2015) | per-generation *N_e* trajectory; dominant tool in 2023–2025 horse literature | LD-pruned PLINK set | `divStats/ne/snep/...` |
 | `summary_het.py` | Heterozygosity summary stats (observed/expected, F-coefficients) |
 | `roh_plot.py` | Scatter plots correlating F_ROH vs consensus ROH sharing |
 | `roh_histograms.py` | Unified histogram script: use `--metric ratio` (ROH_shared/F_ROH) or `--metric shared` (Percent_of_Consensus_ROH) |
@@ -97,7 +87,26 @@ Each LD-decay-based *N_e* tool lives in its own wrapper under `scripts/ne/`. The
 | `roh_common_individual.py` | Per-individual ROH_common scoring with **exact** leave-one-out: `mean over w in W_i of (n_w − 1)/(N − 1)`. Emits `roh_common.${rg}.tsv` with genome-wide + 4 class scores + window counts; NA when a length class is empty for an individual. |
 | `roh_common_plot.py` | Multi-mode plotter for Figures 2–4 of the ROH_common manuscript: `manhattan` (raw line plot, no smoothing), `scatter`, `lengthbox`. |
 | `roh_common_subgroup_summary.py` | 9-row mean +/- SD table across the 5 ROH_common metrics: wholePop (cohort-wide scoring) + Pacer/Trotter + 6 gait × book-size subgroups (within-gait scoring). Emits `divStats/roh_common/roh_common_subgroup_summary.csv`. |
+| `roh_common_pairwise_stats.py` | Pairwise Mann-Whitney U + Cohen's d for ROH_common across the six gait × book-size subgroups, over 5 metrics (genome-wide + 4 length classes) — 15 unordered pairs × 5 metrics = 75 rows. `p_adj_bonferroni` is the Bonferroni FWER-adjusted p-value computed within each metric family (15 tests). Emits `divStats/roh_common/roh_common_pairwise_stats.tsv`. |
 | `utils.py` | Shared constants (`BOOK_SIZE_ORDER`, `BOOK_SIZE_COLORS`) and `format_stats()` used by summary scripts |
+
+### LD-decay effective population size (`scripts/ne/`)
+
+Each LD-decay-based *N_e* tool lives in its own wrapper under `scripts/ne/`. The convention is **modular and opt-out**: `genDiversity_aggregate.sh` iterates `gone2`, `currentne2`, `neestimator`, `snep` and invokes any wrapper that exists and is executable. To remove a tool: delete (or `chmod -x`) its `run_*.sh` and `install_*.sh` files. No edits to `genDiversity_aggregate.sh` required.
+
+GONE2 gets the **unpruned** post-QC set (its estimator needs the full LD spectrum); the other three get the **LD-pruned** set, matching McGivney 2020 / Manunza 2025 practice. Every wrapper runs once per group (wholePop / Trotter / Pacer) and emits a standardised summary CSV with columns `Group, Method, Generations_ago, Ne, CI_level, CI_low, CI_high`. `Generations_ago` is an integer generation for the trajectory tools and the literal `contemporary` for the single-point tools.
+
+| Wrapper | Tool | Reference | Input | Output |
+|---|---|---|---|---|
+| `scripts/ne/run_gone2.sh` (+ `install_gone2.sh`) | **GONE2 v1.0.2** (Santiago, Köpke & Caballero 2025; doi:10.1038/s41467-025-61378-w) | per-generation *N_e* trajectory from a single SNP sample using the full LD spectrum | post-QC PLINK 1 `.bed/.bim/.fam` set, **not** LD-pruned (full LD spectrum required); MAF 0.05; constant rec rate 1.16 cM/Mb (Beeson et al. 2020) | `divStats/ne/gone2/<group>/<group>_GONE2_{Ne,STATS,d2}` + `divStats/ne/gone2/Ne_gone2_summary.csv` |
+| `scripts/ne/run_currentne2.sh` (+ `install_currentne2.sh`) | **currentNe2** (Santiago, Köpke & Caballero 2025) | contemporary single-point *N_e* from LD between mostly-unlinked loci; the faster analogue to NeEstimator recommended by the GONE2 paper | LD-pruned PLINK set; rec rate 1.16 cM/Mb | `divStats/ne/currentne2/<group>/input.<group>_currentNe2_OUTPUT.txt` + `Ne_currentne2_summary.csv`. `CI_level=90` — currentNe2 emits 50% / 90% CIs natively, not 95% |
+| `scripts/ne/run_neestimator.sh` (+ `install_neestimator.sh`) | **NeEstimator v2.x** (Do et al. 2014) | contemporary point *N_e* via the LD method; method-matched to McGivney 2020's Thoroughbred *N_e* = 330 | LD-pruned PLINK set converted to GENEPOP; P_Crit 0.02, random mating, Waples (2006) bias correction, jackknife CIs (Manunza 2025 livestock recommendations) | `divStats/ne/neestimator/<group>/input.<group>Ne.txt` + `Ne_neestimator_summary.csv`. `CI_level=95_jackknife` when the jackknife block parses |
+| `scripts/ne/run_snep.sh` (+ `install_snep.sh`) | **SNeP v1.11** (Barbato et al. 2015; doi:10.3389/fgene.2015.00109) | per-generation *N_e* trajectory from LD decay via the Sved–Feldman (1971) approximation; the dominant tool in 2023–2025 livestock literature | LD-pruned PLINK set; MAF 0.05, rec rate 1.16e-8 M/bp, `-itemsTH 500` minimum SNP pairs per distance bin | `divStats/ne/snep/<group>/*.{NeAll,LDAll}` + `Ne_snep_summary.csv` |
+| `scripts/ne/plot_ne_trajectory.py` | — | overlays one or more summary CSVs on a shared *N_e*-vs-generations axis: log-y, a split x-axis at gen 15, a shaded gen 1–4 GONE artifact band (Novo et al. 2023), Standardbred event lines (2009 USTA cap, 1973 studbook closure, ~1872 breed founding), and a calendar-year secondary axis at G = 11.0 yr/gen (Waples 2026) | any standardised `Ne_<tool>_summary.csv` | `<out>.png` + `<out>.pdf` |
+
+**GONE2 metapopulation sensitivity run.** `run_gone2.sh --metapopulation` passes GONE2's `-x` flag (sample drawn from a metapopulation of equal-sized subpopulations) instead of the default panmixia assumption. Pair it with `--output-subdir gone2_x --method-label GONE2_x` so the sensitivity outputs land in `divStats/ne/gone2_x/` and stay distinguishable in the summary CSV's `Method` column rather than clobbering the panmixia run. Invoked manually, not by the `aggregate.sh` loop.
+
+**Interpretation caveat.** GONE2's gen 1–4 values are a single repeated number — a block-estimator saturation artifact, not signal. Do not read that plateau as a biological cross-group difference; start at gen 5.
 
 All Python scripts use `argparse`; run with `--help` to see usage.
 
@@ -193,7 +202,22 @@ The pipeline creates and uses one top-level directory per run:
 
 - `results_<timestamp>/` — per-run output directory. Contains the downloaded inputs (`SNPdata_iScan_Standardbred/`, `Miscellaneous_documents_standardbred/`) alongside pipeline outputs (`preprocess/`, `dedup/`, `inspect/`, `filtered/`, `LD_pruned/`, `divStats/`, `rep_ROHRM/`) and the run log (`run.log`). `<timestamp>` is `YYYYMMDD_HHMMSS` captured when the script starts; override by exporting `OUTPUT_DIR=<existing_dir>` before invocation to reuse or resume into a prior folder. Subdir names after the timestamped prefix are unchanged from the pre-refactor layout. Per-group work adds `rep_ROHRM/perGroup_${rg}/` working dirs and `preprocess/samples.${rg}.txt` / `sample_groups.tsv` artifacts.
 
-`results_*/` is in `.gitignore`.
+`results_*/` is in `.gitignore`. So are `manuscript/` and `genDiv_manuscript/` — local-only writing directories that are not part of the pipeline.
+
+### One-off exploratory analyses (`explore.sh`, `explore/`)
+
+`explore.sh` is an opt-in driver for exploratory questions that do not belong in the main pipeline. It sources `genDiversity_common.sh` for the `log` / `run_python` / `upload` helpers, reads an **existing** run directory, writes to `${OUTPUT_DIR}/explore/`, and rclone-uploads each deliverable to `$GDRIVE_BASE/explore/<task_name>/`.
+
+```bash
+OUTPUT_DIR=results_<timestamp> bash explore.sh              # all tasks
+OUTPUT_DIR=results_<timestamp> bash explore.sh <task_name>  # one task
+```
+
+Each task is a self-contained block calling a script in `explore/`, with a header listing its question, inputs, local outputs, and GDrive destination. New tasks follow that convention and must upload their deliverables. Nothing here runs as part of `genDiversity.sh`.
+
+| Script | Purpose |
+|---|---|
+| `explore/relationship_comparison_colored.py` | Re-draws the Standard-GRM vs ROH-GRM pair-kinship scatter from `Robust_Matrix_Comparison_Enhanced.wholePop.png`, recoloured by pair-level gait (3 categories) and by pair-level book size (6 categories), one panel per ROH cutoff (1 / 5 / 10 Mb) with axes shared within a figure. The book-size view is emitted three times: all six categories, plus HIGH-\* and LOW/MEDIUM-\* subsets that keep the full-view palette but re-fit their axes. |
 
 Each run writes its full stdout+stderr to `${OUTPUT_DIR}/run.log` via a `tee` + `exec` redirection set up in `genDiversity_common.sh`. The redirection is guarded by the `GENDIV_LOG_SETUP` env var so subscripts invoked by the wrapper inherit its pipe instead of piling on their own tee and double-writing every line.
 
