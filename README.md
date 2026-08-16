@@ -15,13 +15,15 @@ mamba create -n genDiv \
   conda-forge::r-base=4.5.2 \
   conda-forge::r-ggplot2=4.0.1 \
   conda-forge::r-gridextra=2.3 \
-  conda-forge::r-qqman=0.1.9 \
   conda-forge::r-viridis=0.6.5 \
   conda-forge::r-reshape2=1.4.5 \
   conda-forge::r-ggally=2.4.0 \
   conda-forge::r-effsize=0.8.1 \
+  conda-forge::r-dplyr=1.1.4 \
+  conda-forge::r-tidyr=1.3.2 \
   conda-forge::openpyxl \
   conda-forge::scikit-allel \
+  conda-forge::tqdm \
   conda-forge::numpy conda-forge::pandas conda-forge::scipy \
   conda-forge::matplotlib conda-forge::seaborn \
   bioconda::plink bioconda::plink2 bioconda::bcftools bioconda::bedtools \
@@ -29,6 +31,11 @@ mamba create -n genDiv \
 
 ## Optional / not currently invoked by genDiversity.sh — keep if you plan to wire them in:
 ##   bioconda::gcta bioconda::snakemake=9.16.3
+##
+## Every package above IS invoked: r-dplyr by fst_stats.R, r-tidyr by plot_Ae.R,
+## tqdm and scikit-allel by ROHRM_Creator.py, openpyxl by the read_excel step in
+## genDiversity_shared.sh. They resolve as transitive dependencies too, so a stale
+## env can mask a missing pin — build from this list, not from `conda env export`.
 
 conda activate genDiv
 ```
@@ -47,9 +54,12 @@ bash ./genDiversity.sh
 The pipeline is split across five bash files at the repo root (`genDiversity.sh` is the wrapper; `genDiversity_common.sh` holds shared CONFIG/helpers; `genDiversity_shared.sh`, `genDiversity_per_group.sh`, and `genDiversity_aggregate.sh` do the work). Each subscript is independently runnable, useful for refreshing just one stage:
 
 ```bash
-OUTPUT_DIR="Path to an output directory" bash ./genDiversity_shared.sh
-for rg in wholePop Trotter Pacer; do bash OUTPUT_DIR="Path to same output directory" ./genDiversity_per_group.sh "$rg"; done
-OUTPUT_DIR="Path to same output directory" bash ./genDiversity_aggregate.sh
+## Use the SAME OUTPUT_DIR for all three stages — later stages read earlier stages' files.
+export OUTPUT_DIR=results_<timestamp>
+
+bash ./genDiversity_shared.sh
+for rg in wholePop Trotter Pacer; do bash ./genDiversity_per_group.sh "$rg"; done
+bash ./genDiversity_aggregate.sh
 ```
 
 ## Validating outputs
@@ -76,5 +86,5 @@ bash scripts/benchmark/run_benchmark.sh \
 If you would like to re-upload the outputs of any run (either actual or benchmarking) to the folder `outputs` in GDrive, you can run this command:
 
 ```bash
-OUTPUT_DIR=[Path to results folder] bash upload_outputs.sh
+OUTPUT_DIR=results_<timestamp> bash upload_outputs.sh
 ``` 

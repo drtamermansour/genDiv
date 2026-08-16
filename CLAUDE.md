@@ -223,11 +223,11 @@ Each run writes its full stdout+stderr to `${OUTPUT_DIR}/run.log` via a `tee` + 
 
 The pipeline also expects two sibling repositories and a configured rclone remote to exist:
 
-- `../InfiniTier/results/matchingSNPs_binary_consistantMapping.equCab3_map` — EquCab3 remap table
-- `../Horse_parentage_SNPs/equCab3/download/equCab3.fa` + `equCab3_genome.fa.fai` — reference genome
-- `remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs` — rclone remote for input download and output upload
+- `../InfiniTier/results_E80selv2_to_equCab3noAlt_genDiv/qc/Equine80select_v2_1_HTS_20143333_B1_UCD_allele_map_equCab3noAlt.tsv` — EquCab3 remap table (`$equCab3_map`)
+- `../Horse_parentage_SNPs/equCab3/download/equCab3.fa` (`$ref`) + `../Horse_parentage_SNPs/equCab3/equCab3_genome.fa.fai` (`$reference_fai`) — reference genome
+- `remote_UCDavis_GoogleDr:STR_Imputation_2025/outputs` (`$GDRIVE_BASE`) — rclone remote for input download and output upload
 
-A fresh clone of `genDiv` alone will fail early with path errors.
+All four are set at the top of the CONFIG block in `genDiversity_common.sh`; they are the first things to edit when moving the pipeline to a new machine. A fresh clone of `genDiv` alone will fail early with path errors.
 
 ### GPA per-group reference files
 
