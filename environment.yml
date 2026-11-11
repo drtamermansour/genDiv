@@ -48,7 +48,7 @@ dependencies:
 
   # ---- Python -------------------------------------------------------------
   - python=3.13
-  - numpy=2.3.5
+  - numpy=2.4.6               # >=2.4.2 required by every py313 cyvcf2 build
   - pandas=2.3.3
   - scipy=1.17.0              # roh_common_pairwise_stats.py (mannwhitneyu)
   - matplotlib-base=3.10.8    # -base: plots are written to file, no GUI backend
@@ -56,6 +56,8 @@ dependencies:
   - scikit-allel=1.3.13       # ROHRM_Creator.py (`import allel`)
   - tqdm=4.67.1               # ROHRM_Creator.py progress bar
   - openpyxl=3.1.5            # pd.read_excel in genDiversity_shared.sh
+  - cyvcf2=0.32.1             # explore/compare_two_roh_haplotypes.py. Last release
+                              # built against htslib 1.22; 0.33+ needs htslib >=1.23.1
 
   # ---- Optional: installed historically, invoked by nothing today ---------
   # Re-add if you wire them in; `scripts/check_env.py` will not ask for them.

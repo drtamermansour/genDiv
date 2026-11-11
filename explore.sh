@@ -79,3 +79,52 @@ if run_task relationship_comparison_colored; then
     upload "${OUTPUT_DIR}/explore/relationship_comparison_byBookSize_HIGHgroups.wholePop.png"          "explore/relationship_comparison_colored/"
     upload "${OUTPUT_DIR}/explore/relationship_comparison_byBookSize_LOWandMEDIUMgroups.wholePop.png"  "explore/relationship_comparison_colored/"
 fi
+
+##########################################
+## roh_haplotypes
+##########################################
+## Question:
+##   Where two animals both carry a ROH, is it the same haplotype or two
+##   different homozygous haplotypes at the same locus?
+##
+## What it does:
+##   Partitions the union of the two animals' L3 ROH intervals into pieces of
+##   constant carrier status, then classifies each piece. Where both animals
+##   are in ROH it compares genotypes at jointly homozygous SNPs:
+##   SHARED_HAPLOTYPE at >= --match-threshold concordance, DIFFERENT_HAPLOTYPES
+##   below it, INSUFFICIENT_JOINT_HOM_SNPs under --min-joint-hom-snps. Pieces
+##   where only one animal is in ROH are ONLY_A_ROH / ONLY_B_ROH. ROH calls
+##   come from the per-gait files, so each animal is looked up in its own
+##   gait's calls.
+##
+##   The pair defaults to HR15332 vs HR15329; override with
+##   ROH_HAP_ANIMAL_A / ROH_HAP_ANIMAL_B.
+##
+## Inputs (read from $OUTPUT_DIR):
+##   filtered/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.vcf.norm.phased.vcf.gz
+##   divStats/roh.L3.Trotter.txt
+##   divStats/roh.L3.Pacer.txt
+##
+## Outputs (local, under $OUTPUT_DIR/explore/roh_haplotypes/):
+##   <A>_vs_<B>.pairwise_roh_intervals.tsv      (one row per partitioned interval)
+##   <A>_vs_<B>.pairwise_roh_haplotypes.fasta   (both animals' haplotype per interval)
+##
+## Remote (GDrive, under $GDRIVE_BASE):
+##   explore/roh_haplotypes/<both files above>
+if run_task roh_haplotypes; then
+    log "Explore: roh_haplotypes"
+    animal_a="${ROH_HAP_ANIMAL_A:-HR15332}"
+    animal_b="${ROH_HAP_ANIMAL_B:-HR15329}"
+    prefix="${OUTPUT_DIR}/explore/roh_haplotypes/${animal_a}_vs_${animal_b}"
+    run_python explore/compare_two_roh_haplotypes.py \
+        --vcf "${OUTPUT_DIR}/filtered/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.vcf.norm.phased.vcf.gz" \
+        --roh-trotter "${OUTPUT_DIR}/divStats/roh.L3.Trotter.txt" \
+        --roh-pacer "${OUTPUT_DIR}/divStats/roh.L3.Pacer.txt" \
+        --animal-a "$animal_a" \
+        --animal-b "$animal_b" \
+        --match-threshold 0.90 \
+        --min-joint-hom-snps 10 \
+        --out "$prefix"
+    upload "${prefix}.pairwise_roh_intervals.tsv"     "explore/roh_haplotypes/"
+    upload "${prefix}.pairwise_roh_haplotypes.fasta"  "explore/roh_haplotypes/"
+fi

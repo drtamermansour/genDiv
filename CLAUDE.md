@@ -243,6 +243,7 @@ Each task is a self-contained block calling a script in `explore/`, with a heade
 | Script | Purpose |
 |---|---|
 | `explore/relationship_comparison_colored.py` | Re-draws the Standard-GRM vs ROH-GRM pair-kinship scatter from `Robust_Matrix_Comparison_Enhanced.wholePop.png`, recoloured by pair-level gait (3 categories) and by pair-level book size (6 categories), one panel per ROH cutoff (1 / 5 / 10 Mb) with axes shared within a figure. The book-size view is emitted three times: all six categories, plus HIGH-\* and LOW/MEDIUM-\* subsets that keep the full-view palette but re-fit their axes. |
+| `explore/compare_two_roh_haplotypes.py` | For one pair of animals (task `roh_haplotypes`; pair set by `ROH_HAP_ANIMAL_A` / `ROH_HAP_ANIMAL_B`), partitions the union of their L3 ROH intervals into pieces of constant carrier status and classifies each: `SHARED_HAPLOTYPE` / `DIFFERENT_HAPLOTYPES` by genotype concordance at jointly homozygous SNPs on the phased VCF, `INSUFFICIENT_JOINT_HOM_SNPs` below `--min-joint-hom-snps`, or `ONLY_A_ROH` / `ONLY_B_ROH`. Writes a per-interval TSV and a FASTA of both animals' haplotypes. The only consumer of `cyvcf2`. |
 
 Each run writes its full stdout+stderr to `${OUTPUT_DIR}/run.log` via a `tee` + `exec` redirection set up in `genDiversity_common.sh`. The redirection is guarded by the `GENDIV_LOG_SETUP` env var so subscripts invoked by the wrapper inherit its pipe instead of piling on their own tee and double-writing every line.
 
