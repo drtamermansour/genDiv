@@ -100,7 +100,11 @@ fi
 ##   The pair defaults to HR15332 vs HR15329; override with
 ##   ROH_HAP_ANIMAL_A / ROH_HAP_ANIMAL_B.
 ##
-## Inputs (read from $OUTPUT_DIR):
+##   Also draws a single-page A3 figure: both horses' original ROHs on all
+##   31 autosomes to one physical scale, coloured by ROH length class, plus
+##   a concordance track over the intervals where both are in ROH.
+##
+## Inputs (read from $OUTPUT_DIR, plus $reference_fai from CONFIG):
 ##   filtered/USTA_Diversity_Study.remap.refAlleles.dedup.vcf.filtered.vcf.norm.phased.vcf.gz
 ##   divStats/roh.L3.Trotter.txt
 ##   divStats/roh.L3.Pacer.txt
@@ -108,9 +112,11 @@ fi
 ## Outputs (local, under $OUTPUT_DIR/explore/roh_haplotypes/):
 ##   <A>_vs_<B>.pairwise_roh_intervals.tsv      (one row per partitioned interval)
 ##   <A>_vs_<B>.pairwise_roh_haplotypes.fasta   (both animals' haplotype per interval)
+##   <A>_vs_<B>.pairwise_roh_comparison.pdf     (A3 landscape figure, vector)
+##   <A>_vs_<B>.pairwise_roh_comparison.png     (same figure, 300 dpi)
 ##
 ## Remote (GDrive, under $GDRIVE_BASE):
-##   explore/roh_haplotypes/<both files above>
+##   explore/roh_haplotypes/<all four files above>
 if run_task roh_haplotypes; then
     log "Explore: roh_haplotypes"
     animal_a="${ROH_HAP_ANIMAL_A:-HR15332}"
@@ -124,7 +130,11 @@ if run_task roh_haplotypes; then
         --animal-b "$animal_b" \
         --match-threshold 0.90 \
         --min-joint-hom-snps 10 \
+        --reference-fai "$reference_fai" \
+        --plot --plot-png \
         --out "$prefix"
     upload "${prefix}.pairwise_roh_intervals.tsv"     "explore/roh_haplotypes/"
     upload "${prefix}.pairwise_roh_haplotypes.fasta"  "explore/roh_haplotypes/"
+    upload "${prefix}.pairwise_roh_comparison.pdf"    "explore/roh_haplotypes/"
+    upload "${prefix}.pairwise_roh_comparison.png"    "explore/roh_haplotypes/"
 fi
